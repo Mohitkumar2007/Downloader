@@ -182,12 +182,14 @@ if toggle_video:
 
     video_link = st.text_input("Enter YouTube video URL:", key="video_url")
     
-    # Quality and format selection
-    col_q1, col_q2 = st.columns(2)
+    # Enhanced quality and format selection
+    col_q1, col_q2, col_q3 = st.columns(3)
     with col_q1:
-        video_format = st.selectbox("Video Format:", ["mp4", "webm"], key="video_format")
+        video_format = st.selectbox("📹 Video Format:", ["mp4", "webm"], key="video_format", help="MP4 is more compatible, WebM may have better compression")
     with col_q2:
-        quality_option = st.selectbox("Quality:", ["Highest Available", "1080p", "720p", "480p", "360p"], key="video_quality")
+        quality_option = st.selectbox("🎯 Quality:", ["Best Available (HD)", "1080p (Full HD)", "720p (HD)", "480p (SD)", "360p (Low)", "240p (Mobile)"], key="video_quality", help="Higher quality = larger file size")
+    with col_q3:
+        stream_type = st.selectbox("📺 Stream Type:", ["Progressive (Video+Audio)", "Adaptive (Video Only)"], key="stream_type", help="Progressive: All-in-one file, Adaptive: Higher quality but video only")
 
     download_video_btn = st.button("📥 Download Video", key="video_btn")
 
@@ -205,39 +207,145 @@ if toggle_video:
                    "- Wait a few minutes before trying again")
         else:
             try:
-                # Display thumbnail and video info
-                col_thumb, col_info = st.columns([1, 2])
-                with col_thumb:
-                    st.image(yt.thumbnail_url, caption="Video Thumbnail", width=300)
+                # Display video info and thumbnail with better layout
+                st.subheader(f"📺 {yt.title}")
                 
-                with col_info:
-                    st.markdown(f"**📺 Title:** {yt.title}")
-                    st.markdown(f"**👀 Views:** {yt.views:,}" if yt.views else "**👀 Views:** N/A")
-                    st.markdown(f"**⏱️ Duration:** {format_duration(yt.length)}")
-                    st.markdown(f"**📅 Upload Date:** {yt.publish_date}" if yt.publish_date else "**📅 Upload Date:** N/A")
-                    st.markdown(f"**👤 Channel:** {yt.author}")
-                    st.markdown(f"**📊 Rating:** {yt.rating}/5" if yt.rating else "**📊 Rating:** N/A")
+                # Video information in organized columns
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("👀 Views", f"{yt.views:,}" if yt.views else "N/A")
+                    st.metric("⏱️ Duration", format_duration(yt.length))
+                with col2:
+                    st.metric("👤 Channel", yt.author)
+                    st.metric("📅 Upload Date", yt.publish_date.strftime("%Y-%m-%d") if yt.publish_date else "N/A")
+                with col3:
+                    st.metric("📊 Rating", f"{yt.rating}/5" if yt.rating else "N/A")
+                
+                # Thumbnail in separate section with proper spacing
+                st.markdown("---")
+                col_thumb_center, col_empty1, col_empty2 = st.columns([2, 1, 1])
+                with col_thumb_center:
+                    st.image(yt.thumbnail_url, caption="🖼️ Video Thumbnail", use_column_width=True)
 
-                # Show available streams
-                st.subheader("Available Streams:")
-                streams = yt.streams.filter(file_extension=video_format, progressive=True)
+                # Show available streams with better quality selection
+                st.markdown("---")
+                st.subheader("🎥 Available Video Streams")
                 
-                if not streams:
-                    streams = yt.streams.filter(file_extension=video_format, adaptive=True)
+                # Get all available streams
+                all_streams = yt.streams.filter(file_extension=video_format, type='video')
                 
-                # Select stream based on quality preference
-                if quality_option == "Highest Available":
-                    selected_stream = yt.streams.get_highest_resolution()
-                else:
-                    quality_map = {"1080p": "1080p", "720p": "720p", "480p": "480p", "360p": "360p"}
-                    selected_stream = yt.streams.filter(res=quality_map.get(quality_option)).first()
+                # Display available qualities
+                available_qualities = []
+                for stream in all_streams:
+                    if stream.resolution:
+                        quality_info = f"{stream.resolution} ({stream.fps}fps) - {format_file_size(stream.filesize) if hasattr(stream, 'filesize') else 'Unknown size'}"
+                        available_qualities.append((stream.resolution, quality_info, stream))
+                
+                if available_qualities:
+                    st.info(f"📋 Available qualities: {', '.join([q[0] for q in available_qualities])}")
+                
+                # Enhanced stream selection logic with better quality handling
+                selected_stream = None
+                
+                # Map quality options to resolution values
+                quality_map = {
+                    "Best Available (HD)": None,
+                    "1080p (Full HD)": "1080p",
+                    "720p (HD)": "720p", 
+                    "480p (SD)": "480p",
+                    "360p (Low)": "360p",
+                    "240p (Mobile)": "240p"
+                }
+                
+                target_quality = quality_map.get(quality_option)
+                prefer_progressive = stream_type == "Progressive (Video+Audio)"
+                
+                if quality_option == "Best Available (HD)":
+                    if prefer_progressive:
+                        # Get best progressive stream (video + audio combined)
+                        selected_stream = yt.streams.filter(
+                            file_extension=video_format, 
+                            progressive=True
+                        ).order_by('resolution').desc().first()
+                    
+                    # If no progressive or user prefers adaptive, get best adaptive video
+                    if not selected_stream or not prefer_progressive:
+                        selected_stream = yt.streams.filter(
+                            file_extension=video_format, 
+                            adaptive=True, 
+                            type='video'
+                        ).order_by('resolution').desc().first()
+                    
+                    # Final fallback
                     if not selected_stream:
                         selected_stream = yt.streams.get_highest_resolution()
-                        st.warning(f"Requested quality not available. Downloading highest available quality.")
+                        
+                else:
+                    # Specific quality requested
+                    if prefer_progressive:
+                        # Try progressive stream at target quality
+                        selected_stream = yt.streams.filter(
+                            file_extension=video_format, 
+                            progressive=True, 
+                            res=target_quality
+                        ).first()
+                    
+                    # If no progressive stream or user prefers adaptive
+                    if not selected_stream or not prefer_progressive:
+                        selected_stream = yt.streams.filter(
+                            file_extension=video_format, 
+                            adaptive=True, 
+                            type='video',
+                            res=target_quality
+                        ).first()
+                    
+                    # Fallback to closest available quality
+                    if not selected_stream:
+                        quality_fallback = ["720p", "480p", "360p", "1080p", "240p"]
+                        if target_quality in quality_fallback:
+                            quality_fallback.remove(target_quality)
+                        quality_fallback.insert(0, target_quality)
+                        
+                        for fallback_quality in quality_fallback[1:]:  # Skip first (original target)
+                            if prefer_progressive:
+                                selected_stream = yt.streams.filter(
+                                    file_extension=video_format, 
+                                    progressive=True, 
+                                    res=fallback_quality
+                                ).first()
+                            else:
+                                selected_stream = yt.streams.filter(
+                                    file_extension=video_format, 
+                                    adaptive=True, 
+                                    type='video',
+                                    res=fallback_quality
+                                ).first()
+                            
+                            if selected_stream:
+                                st.warning(f"⚠️ {target_quality} not available. Using {fallback_quality} instead.")
+                                break
+                    
+                    # Final fallback
+                    if not selected_stream:
+                        selected_stream = yt.streams.get_highest_resolution()
+                        st.warning(f"⚠️ Requested quality not available. Using highest available quality.")
 
                 if selected_stream:
                     file_size = selected_stream.filesize if hasattr(selected_stream, 'filesize') else 0
-                    st.info(f"📊 Selected: {selected_stream.resolution or 'Audio'} - {format_file_size(file_size)}")
+                    fps_info = f" @ {selected_stream.fps}fps" if hasattr(selected_stream, 'fps') and selected_stream.fps else ""
+                    stream_type_info = "Progressive" if selected_stream.is_progressive else "Adaptive"
+                    
+                    st.success(f"✅ **Selected Stream:**")
+                    col_s1, col_s2, col_s3 = st.columns(3)
+                    with col_s1:
+                        st.metric("🎯 Quality", f"{selected_stream.resolution or 'Default'}{fps_info}")
+                    with col_s2:
+                        st.metric("📁 File Size", format_file_size(file_size))
+                    with col_s3:
+                        st.metric("📺 Type", stream_type_info)
+                    
+                    if not selected_stream.is_progressive:
+                        st.warning("⚠️ **Note:** Adaptive streams contain video only. Audio will need to be downloaded separately if needed.")
 
                     # Download with progress
                     try:
@@ -310,24 +418,47 @@ if toggle_audio:
                    "- Wait a few minutes before trying again")
         else:
             try:
-                # Display video info
-                col_thumb, col_info = st.columns([1, 2])
-                with col_thumb:
-                    st.image(yt.thumbnail_url, caption="Video Thumbnail", width=300)
+                # Display audio info with better layout
+                st.subheader(f"🎵 {yt.title}")
                 
-                with col_info:
-                    st.markdown(f"**🎵 Title:** {yt.title}")
-                    st.markdown(f"**⏱️ Duration:** {format_duration(yt.length)}")
-                    st.markdown(f"**👤 Channel:** {yt.author}")
+                # Audio information in organized columns
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("⏱️ Duration", format_duration(yt.length))
+                with col2:
+                    st.metric("👤 Channel", yt.author)
+                
+                # Thumbnail in separate section with proper spacing
+                st.markdown("---")
+                col_thumb_center, col_empty1, col_empty2 = st.columns([2, 1, 1])
+                with col_thumb_center:
+                    st.image(yt.thumbnail_url, caption="🎵 Audio Thumbnail", use_column_width=True)
 
-                # Get audio stream
-                audio_stream = yt.streams.filter(only_audio=True, file_extension=audio_format).first()
+                # Enhanced audio stream selection
+                st.markdown("---")
+                st.subheader("🎵 Available Audio Streams")
+                
+                # Get best quality audio stream
+                audio_streams = yt.streams.filter(only_audio=True).order_by('abr').desc()
+                
+                if audio_format == "mp4":
+                    audio_stream = yt.streams.filter(only_audio=True, file_extension='mp4').order_by('abr').desc().first()
+                elif audio_format == "webm":
+                    audio_stream = yt.streams.filter(only_audio=True, file_extension='webm').order_by('abr').desc().first()
+                
+                # Fallback to any audio stream
                 if not audio_stream:
-                    audio_stream = yt.streams.filter(only_audio=True).first()
+                    audio_stream = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
 
                 if audio_stream:
                     file_size = audio_stream.filesize if hasattr(audio_stream, 'filesize') else 0
-                    st.info(f"📊 Audio Quality: {audio_stream.abr or 'Default'} - {format_file_size(file_size)}")
+                    bitrate = audio_stream.abr or 'Default'
+                    st.info(f"🎵 Selected Audio Quality: **{bitrate}** - {format_file_size(file_size)}")
+                    
+                    # Show available audio qualities
+                    available_audio = [f"{stream.abr} ({stream.mime_type})" for stream in audio_streams[:3] if stream.abr]
+                    if available_audio:
+                        st.info(f"📋 Available audio qualities: {', '.join(available_audio)}")
 
                     # Download with progress
                     try:
