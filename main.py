@@ -9,6 +9,9 @@ from datetime import datetime
 import time
 import re
 from urllib.parse import urlparse
+import random
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # --- Initialize session state ---
 if 'download_history' not in st.session_state:
@@ -17,6 +20,72 @@ if 'dark_theme' not in st.session_state:
     st.session_state.dark_theme = False
 
 # --- Helper Functions ---
+def create_robust_session():
+    """Create a session with retry strategy and user agent rotation"""
+    session = requests.Session()
+    
+    # Add retry strategy
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    
+    # Rotate user agents to avoid detection
+    user_agents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    ]
+    session.headers.update({'User-Agent': random.choice(user_agents)})
+    return session
+
+def create_youtube_object(url, max_retries=3):
+    """Create YouTube object with error handling and retries"""
+    for attempt in range(max_retries):
+        try:
+            # Add random delay to avoid rate limiting
+            if attempt > 0:
+                time.sleep(random.uniform(1, 3))
+            
+            # Create YouTube object with custom session
+            yt = YouTube(url)
+            
+            # Test if we can access basic info
+            _ = yt.title  # This will trigger the actual request
+            return yt, None
+            
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "403" in error_msg or "forbidden" in error_msg:
+                if attempt < max_retries - 1:
+                    st.warning(f"⚠️ Attempt {attempt + 1} failed (403 Forbidden). Retrying in {2 + attempt} seconds...")
+                    time.sleep(2 + attempt)
+                    continue
+                else:
+                    return None, "❌ **403 Forbidden Error**: This video may be restricted, private, or YouTube is blocking requests. Try:\n\n" \
+                                "1. **Wait a few minutes** and try again\n" \
+                                "2. **Check if the video is public** and available\n" \
+                                "3. **Try a different video** to test\n" \
+                                "4. **Use a VPN** if you're in a restricted region\n\n" \
+                                "**Note**: YouTube actively blocks automated downloads. This is normal behavior."
+            elif "private" in error_msg or "unavailable" in error_msg:
+                return None, "❌ **Video Unavailable**: This video is private, deleted, or restricted in your region."
+            elif "age" in error_msg:
+                return None, "❌ **Age Restricted**: This video requires age verification and cannot be downloaded."
+            else:
+                if attempt < max_retries - 1:
+                    st.warning(f"⚠️ Attempt {attempt + 1} failed: {str(e)[:100]}... Retrying...")
+                    time.sleep(1 + attempt)
+                    continue
+                else:
+                    return None, f"❌ **Error**: {str(e)}"
+    
+    return None, "❌ **Max retries exceeded**: Unable to access the video after multiple attempts."
+
 def add_to_history(item_type, title, file_name, download_time):
     """Add download to history"""
     history_item = {
@@ -65,6 +134,33 @@ st.sidebar.header("⚙️ Settings")
 custom_path = st.sidebar.text_input("📁 Custom Download Path (optional):", placeholder="downloads")
 download_path = custom_path if custom_path else "downloads"
 
+# --- Troubleshooting Section ---
+with st.sidebar.expander("🛠️ Troubleshooting 403 Errors"):
+    st.markdown("""
+    **If you see "HTTP Error 403: Forbidden":**
+    
+    🔄 **Quick Fixes:**
+    - Wait 5-10 minutes before trying again
+    - Try a different video first
+    - Copy URL directly from YouTube
+    - Check if video is public/available
+    
+    📋 **Why this happens:**
+    - YouTube blocks automated downloads
+    - Too many requests from your IP
+    - Video has regional restrictions
+    - Video is private/deleted/age-restricted
+    
+    💡 **Tips:**
+    - Use shorter, older videos first
+    - Avoid popular/trending videos
+    - Don't download too many videos quickly
+    - Try using a VPN if region-locked
+    """)
+
+st.sidebar.markdown("---")
+st.sidebar.info("🔥 **Pro Tip**: If downloads fail, try waiting a few minutes between attempts. YouTube actively prevents bulk downloading.")
+
 # --- Toggle options ---
 st.header("📥 Choose Download Type")
 col1, col2, col3, col4 = st.columns(4)
@@ -96,73 +192,95 @@ if toggle_video:
     download_video_btn = st.button("📥 Download Video", key="video_btn")
 
     if download_video_btn and video_link:
-        try:
-            with st.spinner("Fetching video information..."):
-                yt = YouTube(video_link)
+        # Enhanced error handling with retries
+        with st.spinner("🔍 Fetching video information... (This may take a moment)"):
+            yt, error_msg = create_youtube_object(video_link)
+        
+        if error_msg:
+            st.error(error_msg)
+            st.info("💡 **Troubleshooting Tips:**\n"
+                   "- Make sure the URL is a valid YouTube video link\n"
+                   "- Try copying the URL directly from YouTube\n"
+                   "- Some videos may be region-locked or have restrictions\n"
+                   "- Wait a few minutes before trying again")
+        else:
+            try:
+                # Display thumbnail and video info
+                col_thumb, col_info = st.columns([1, 2])
+                with col_thumb:
+                    st.image(yt.thumbnail_url, caption="Video Thumbnail", width=300)
+                
+                with col_info:
+                    st.markdown(f"**📺 Title:** {yt.title}")
+                    st.markdown(f"**👀 Views:** {yt.views:,}" if yt.views else "**👀 Views:** N/A")
+                    st.markdown(f"**⏱️ Duration:** {format_duration(yt.length)}")
+                    st.markdown(f"**📅 Upload Date:** {yt.publish_date}" if yt.publish_date else "**📅 Upload Date:** N/A")
+                    st.markdown(f"**👤 Channel:** {yt.author}")
+                    st.markdown(f"**📊 Rating:** {yt.rating}/5" if yt.rating else "**📊 Rating:** N/A")
 
-            # Display thumbnail and video info
-            col_thumb, col_info = st.columns([1, 2])
-            with col_thumb:
-                st.image(yt.thumbnail_url, caption="Video Thumbnail", width=300)
-            
-            with col_info:
-                st.markdown(f"**📺 Title:** {yt.title}")
-                st.markdown(f"**👀 Views:** {yt.views:,}")
-                st.markdown(f"**⏱️ Duration:** {format_duration(yt.length)}")
-                st.markdown(f"**📅 Upload Date:** {yt.publish_date}")
-                st.markdown(f"**👤 Channel:** {yt.author}")
-                st.markdown(f"**📊 Rating:** {yt.rating}/5" if yt.rating else "**📊 Rating:** N/A")
-
-            # Show available streams
-            st.subheader("Available Streams:")
-            streams = yt.streams.filter(file_extension=video_format, progressive=True)
-            
-            if not streams:
-                streams = yt.streams.filter(file_extension=video_format, adaptive=True)
-            
-            # Select stream based on quality preference
-            if quality_option == "Highest Available":
-                selected_stream = yt.streams.get_highest_resolution()
-            else:
-                quality_map = {"1080p": "1080p", "720p": "720p", "480p": "480p", "360p": "360p"}
-                selected_stream = yt.streams.filter(res=quality_map.get(quality_option)).first()
-                if not selected_stream:
+                # Show available streams
+                st.subheader("Available Streams:")
+                streams = yt.streams.filter(file_extension=video_format, progressive=True)
+                
+                if not streams:
+                    streams = yt.streams.filter(file_extension=video_format, adaptive=True)
+                
+                # Select stream based on quality preference
+                if quality_option == "Highest Available":
                     selected_stream = yt.streams.get_highest_resolution()
-                    st.warning(f"Requested quality not available. Downloading highest available quality.")
+                else:
+                    quality_map = {"1080p": "1080p", "720p": "720p", "480p": "480p", "360p": "360p"}
+                    selected_stream = yt.streams.filter(res=quality_map.get(quality_option)).first()
+                    if not selected_stream:
+                        selected_stream = yt.streams.get_highest_resolution()
+                        st.warning(f"Requested quality not available. Downloading highest available quality.")
 
-            if selected_stream:
-                file_size = selected_stream.filesize if hasattr(selected_stream, 'filesize') else 0
-                st.info(f"📊 Selected: {selected_stream.resolution or 'Audio'} - {format_file_size(file_size)}")
+                if selected_stream:
+                    file_size = selected_stream.filesize if hasattr(selected_stream, 'filesize') else 0
+                    st.info(f"📊 Selected: {selected_stream.resolution or 'Audio'} - {format_file_size(file_size)}")
 
-                # Download with progress
-                with st.spinner("Downloading video..."):
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
+                    # Download with progress
+                    try:
+                        with st.spinner("Downloading video..."):
+                            progress_bar = st.progress(0)
+                            status_text = st.empty()
+                            
+                            os.makedirs(download_path, exist_ok=True)
+                            file_path = selected_stream.download(output_path=download_path)
+                            file_name = os.path.basename(file_path)
+                            
+                            progress_bar.progress(100)
+                            status_text.text("Download completed!")
+
+                        # Add to history
+                        add_to_history("Video", yt.title, file_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+                        # Provide download button
+                        with open(file_path, "rb") as f:
+                            st.download_button(
+                                label="📥 Save Video to Device",
+                                data=f,
+                                file_name=file_name,
+                                mime="video/mp4"
+                            )
+                        st.success("✅ Video download ready!")
                     
-                    os.makedirs(download_path, exist_ok=True)
-                    file_path = selected_stream.download(output_path=download_path)
-                    file_name = os.path.basename(file_path)
-                    
-                    progress_bar.progress(100)
-                    status_text.text("Download completed!")
+                    except Exception as download_error:
+                        error_msg = str(download_error).lower()
+                        if "403" in error_msg or "forbidden" in error_msg:
+                            st.error("❌ **Download Failed (403 Forbidden)**\n\n"
+                                   "YouTube has blocked this download request. This happens when:\n"
+                                   "- YouTube detects automated downloading\n"
+                                   "- The video has download restrictions\n"
+                                   "- Too many requests from your IP\n\n"
+                                   "**Try again later or use a different video.**")
+                        else:
+                            st.error(f"❌ Download failed: {download_error}")
+                else:
+                    st.error("No suitable stream found for the selected format and quality.")
 
-                # Add to history
-                add_to_history("Video", yt.title, file_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-
-                # Provide download button
-                with open(file_path, "rb") as f:
-                    st.download_button(
-                        label="📥 Save Video to Device",
-                        data=f,
-                        file_name=file_name,
-                        mime="video/mp4"
-                    )
-                st.success("✅ Video download ready!")
-            else:
-                st.error("No suitable stream found for the selected format and quality.")
-
-        except Exception as e:
-            st.error(f"❌ An error occurred: {e}")
+            except Exception as e:
+                st.error(f"❌ An error occurred while processing video info: {e}")
 
 # --- AUDIO DOWNLOADER ---
 if toggle_audio:
@@ -179,58 +297,80 @@ if toggle_audio:
     download_audio_btn = st.button("🎵 Download Audio", key="audio_btn")
 
     if download_audio_btn and audio_link:
-        try:
-            with st.spinner("Fetching audio information..."):
-                yt = YouTube(audio_link)
+        # Enhanced error handling with retries
+        with st.spinner("🔍 Fetching audio information... (This may take a moment)"):
+            yt, error_msg = create_youtube_object(audio_link)
+        
+        if error_msg:
+            st.error(error_msg)
+            st.info("💡 **Troubleshooting Tips:**\n"
+                   "- Make sure the URL is a valid YouTube video link\n"
+                   "- Try copying the URL directly from YouTube\n"
+                   "- Some videos may be region-locked or have restrictions\n"
+                   "- Wait a few minutes before trying again")
+        else:
+            try:
+                # Display video info
+                col_thumb, col_info = st.columns([1, 2])
+                with col_thumb:
+                    st.image(yt.thumbnail_url, caption="Video Thumbnail", width=300)
+                
+                with col_info:
+                    st.markdown(f"**🎵 Title:** {yt.title}")
+                    st.markdown(f"**⏱️ Duration:** {format_duration(yt.length)}")
+                    st.markdown(f"**👤 Channel:** {yt.author}")
 
-            # Display video info
-            col_thumb, col_info = st.columns([1, 2])
-            with col_thumb:
-                st.image(yt.thumbnail_url, caption="Video Thumbnail", width=300)
-            
-            with col_info:
-                st.markdown(f"**🎵 Title:** {yt.title}")
-                st.markdown(f"**⏱️ Duration:** {format_duration(yt.length)}")
-                st.markdown(f"**👤 Channel:** {yt.author}")
+                # Get audio stream
+                audio_stream = yt.streams.filter(only_audio=True, file_extension=audio_format).first()
+                if not audio_stream:
+                    audio_stream = yt.streams.filter(only_audio=True).first()
 
-            # Get audio stream
-            audio_stream = yt.streams.filter(only_audio=True, file_extension=audio_format).first()
-            if not audio_stream:
-                audio_stream = yt.streams.filter(only_audio=True).first()
+                if audio_stream:
+                    file_size = audio_stream.filesize if hasattr(audio_stream, 'filesize') else 0
+                    st.info(f"📊 Audio Quality: {audio_stream.abr or 'Default'} - {format_file_size(file_size)}")
 
-            if audio_stream:
-                file_size = audio_stream.filesize if hasattr(audio_stream, 'filesize') else 0
-                st.info(f"📊 Audio Quality: {audio_stream.abr or 'Default'} - {format_file_size(file_size)}")
+                    # Download with progress
+                    try:
+                        with st.spinner("Downloading audio..."):
+                            progress_bar = st.progress(0)
+                            status_text = st.empty()
+                            
+                            os.makedirs(download_path, exist_ok=True)
+                            file_path = audio_stream.download(output_path=download_path)
+                            file_name = os.path.basename(file_path)
+                            
+                            progress_bar.progress(100)
+                            status_text.text("Download completed!")
 
-                # Download with progress
-                with st.spinner("Downloading audio..."):
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
+                        # Add to history
+                        add_to_history("Audio", yt.title, file_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+                        # Provide download button
+                        with open(file_path, "rb") as f:
+                            st.download_button(
+                                label="🎵 Save Audio to Device",
+                                data=f,
+                                file_name=file_name,
+                                mime="audio/mp4"
+                            )
+                        st.success("✅ Audio download ready!")
                     
-                    os.makedirs(download_path, exist_ok=True)
-                    file_path = audio_stream.download(output_path=download_path)
-                    file_name = os.path.basename(file_path)
-                    
-                    progress_bar.progress(100)
-                    status_text.text("Download completed!")
+                    except Exception as download_error:
+                        error_msg = str(download_error).lower()
+                        if "403" in error_msg or "forbidden" in error_msg:
+                            st.error("❌ **Download Failed (403 Forbidden)**\n\n"
+                                   "YouTube has blocked this download request. This happens when:\n"
+                                   "- YouTube detects automated downloading\n"
+                                   "- The audio has download restrictions\n"
+                                   "- Too many requests from your IP\n\n"
+                                   "**Try again later or use a different video.**")
+                        else:
+                            st.error(f"❌ Download failed: {download_error}")
+                else:
+                    st.error("No audio stream found.")
 
-                # Add to history
-                add_to_history("Audio", yt.title, file_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-
-                # Provide download button
-                with open(file_path, "rb") as f:
-                    st.download_button(
-                        label="🎵 Save Audio to Device",
-                        data=f,
-                        file_name=file_name,
-                        mime="audio/mp4"
-                    )
-                st.success("✅ Audio download ready!")
-            else:
-                st.error("No audio stream found.")
-
-        except Exception as e:
-            st.error(f"❌ An error occurred: {e}")
+            except Exception as e:
+                st.error(f"❌ An error occurred while processing audio info: {e}")
 
 # --- BATCH DOWNLOADER ---
 if toggle_batch:
