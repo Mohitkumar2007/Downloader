@@ -12,6 +12,8 @@ from urllib.parse import urlparse
 import random
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import platform
+from pathlib import Path
 
 # --- Initialize session state ---
 if 'download_history' not in st.session_state:
@@ -20,6 +22,34 @@ if 'dark_theme' not in st.session_state:
     st.session_state.dark_theme = False
 
 # --- Helper Functions ---
+def get_default_download_path():
+    """Get the system's default Downloads folder"""
+    try:
+        system = platform.system()
+        if system == "Windows":
+            # Windows Downloads folder
+            downloads_path = Path.home() / "Downloads"
+        elif system == "Darwin":  # macOS
+            downloads_path = Path.home() / "Downloads"
+        elif system == "Linux":
+            # Try common Linux download locations
+            downloads_path = Path.home() / "Downloads"
+            if not downloads_path.exists():
+                downloads_path = Path.home() / "downloads"
+        else:
+            # Fallback to home directory
+            downloads_path = Path.home() / "Downloads"
+        
+        # Create the directory if it doesn't exist
+        downloads_path.mkdir(exist_ok=True)
+        return str(downloads_path)
+    
+    except Exception as e:
+        # Fallback to current directory downloads folder
+        fallback_path = os.path.join(os.getcwd(), "downloads")
+        os.makedirs(fallback_path, exist_ok=True)
+        return fallback_path
+
 def create_robust_session():
     """Create a session with retry strategy and user agent rotation"""
     session = requests.Session()
@@ -129,10 +159,38 @@ with col_theme1:
         st.session_state.dark_theme = not st.session_state.dark_theme
         st.rerun()
 
-# --- Custom Download Path ---
+# --- Download Path Settings ---
 st.sidebar.header("⚙️ Settings")
-custom_path = st.sidebar.text_input("📁 Custom Download Path (optional):", placeholder="downloads")
-download_path = custom_path if custom_path else "downloads"
+
+# Get system default Downloads folder
+default_downloads = get_default_download_path()
+
+# Display current default path
+st.sidebar.info(f"📂 **Default Download Location:**\n`{default_downloads}`")
+
+# Option to use custom path
+use_custom_path = st.sidebar.checkbox("📁 Use Custom Download Path", help="Check to specify a different download location")
+
+if use_custom_path:
+    custom_path = st.sidebar.text_input(
+        "📁 Custom Download Path:", 
+        placeholder=default_downloads,
+        help="Enter full path where you want files downloaded"
+    )
+    download_path = custom_path if custom_path else default_downloads
+    
+    # Validate custom path
+    if custom_path:
+        try:
+            Path(custom_path).mkdir(parents=True, exist_ok=True)
+            st.sidebar.success(f"✅ Custom path: `{custom_path}`")
+        except Exception as e:
+            st.sidebar.error(f"❌ Invalid path, using default: `{default_downloads}`")
+            download_path = default_downloads
+else:
+    download_path = default_downloads
+
+st.sidebar.markdown(f"**📥 Files will be saved to:**\n`{download_path}`")
 
 # --- Troubleshooting Section ---
 with st.sidebar.expander("🛠️ Troubleshooting Guide"):
@@ -167,6 +225,9 @@ with st.sidebar.expander("🛠️ Troubleshooting Guide"):
 
 st.sidebar.markdown("---")
 st.sidebar.info("🔥 **Pro Tip**: If downloads fail, try waiting a few minutes between attempts. YouTube actively prevents bulk downloading.")
+
+# --- Download Location Info ---
+st.info(f"📂 **Files will be saved to your Downloads folder:** `{os.path.basename(download_path)}`")
 
 # --- Toggle options ---
 st.header("📥 Choose Download Type")
@@ -880,25 +941,79 @@ if st.sidebar.button("📜 View Download History"):
 if st.sidebar.button("📁 View Downloaded Files"):
     st.header("📁 Downloaded Files")
     
+    # Show current download location
+    st.info(f"📂 **Download Location:** `{download_path}`")
+    
+    # Button to open Downloads folder (Windows/Mac/Linux compatible)
+    col_open1, col_open2 = st.columns(2)
+    with col_open1:
+        if st.button("🗂️ Open Downloads Folder", help="Open the downloads folder in your file explorer"):
+            try:
+                system = platform.system()
+                if system == "Windows":
+                    os.startfile(download_path)
+                elif system == "Darwin":  # macOS
+                    os.system(f"open '{download_path}'")
+                elif system == "Linux":
+                    os.system(f"xdg-open '{download_path}'")
+                st.success("📂 Downloads folder opened!")
+            except Exception as e:
+                st.error(f"❌ Could not open folder: {e}")
+    
+    with col_open2:
+        if st.button("📋 Copy Path", help="Copy the download path to clipboard"):
+            try:
+                # For web deployment, show the path for manual copy
+                st.code(download_path, language=None)
+                st.success("📋 Path displayed above for copying!")
+            except Exception:
+                st.info(f"📋 Copy this path: `{download_path}`")
+    
+    # File listing
     if os.path.exists(download_path):
-        files = os.listdir(download_path)
+        files = [f for f in os.listdir(download_path) if os.path.isfile(os.path.join(download_path, f))]
         if files:
+            st.subheader(f"📄 Files ({len(files)} total)")
+            
+            # Sort files by modification time (newest first)
+            files.sort(key=lambda x: os.path.getmtime(os.path.join(download_path, x)), reverse=True)
+            
             for file in files:
                 file_path = os.path.join(download_path, file)
                 file_size = os.path.getsize(file_path)
                 file_modified = datetime.fromtimestamp(os.path.getmtime(file_path))
                 
-                col1, col2, col3 = st.columns([3, 1, 1])
+                # File type icon
+                file_ext = os.path.splitext(file)[1].lower()
+                if file_ext in ['.mp4', '.webm', '.avi', '.mov']:
+                    icon = "🎥"
+                elif file_ext in ['.mp3', '.wav', '.m4a']:
+                    icon = "🎵"
+                elif file_ext in ['.jpg', '.jpeg', '.png', '.webp', '.gif']:
+                    icon = "🖼️"
+                else:
+                    icon = "📄"
+                
+                col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
                 with col1:
-                    st.write(f"📄 {file}")
+                    st.write(f"{icon} {file}")
                 with col2:
                     st.write(f"{format_file_size(file_size)}")
                 with col3:
                     st.write(f"{file_modified.strftime('%m/%d %H:%M')}")
+                with col4:
+                    # Delete button for individual files
+                    if st.button("🗑️", key=f"delete_{file}", help=f"Delete {file}"):
+                        try:
+                            os.remove(file_path)
+                            st.success(f"🗑️ Deleted {file}")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Could not delete {file}: {e}")
         else:
-            st.info("No files in download folder yet!")
+            st.info("📂 No files in download folder yet!")
     else:
-        st.info("Download folder doesn't exist yet!")
+        st.info("📂 Download folder doesn't exist yet!")
 
 # --- STATISTICS ---
 if st.sidebar.button("📊 Statistics"):
@@ -929,8 +1044,9 @@ if st.sidebar.button("📊 Statistics"):
 st.markdown("---")
 st.markdown(
     "<div style='text-align: center; padding: 20px;'>"
-    "<h5>🎬 Advanced Downloader</h5>"
+    "<h5>🎬 Advanced Downloader v3.0</h5>"
     "<p>Made with ❤️ by <span style='color: #0320fc;'>Mohit Kumar A</span> for <span style='color: #0320fc;'>Chethana</span></p>"
+    "<p style='font-size: 12px; color: #666;'>✨ New: Downloads to your system Downloads folder • Audio guaranteed • Smart quality selection</p>"
     "</div>",
     unsafe_allow_html=True
 )
