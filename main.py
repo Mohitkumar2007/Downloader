@@ -135,9 +135,16 @@ custom_path = st.sidebar.text_input("📁 Custom Download Path (optional):", pla
 download_path = custom_path if custom_path else "downloads"
 
 # --- Troubleshooting Section ---
-with st.sidebar.expander("🛠️ Troubleshooting 403 Errors"):
+with st.sidebar.expander("🛠️ Troubleshooting Guide"):
     st.markdown("""
-    **If you see "HTTP Error 403: Forbidden":**
+    **🔇 No Audio in Downloaded Video?**
+    
+    ✅ **Solution:**
+    - Choose options marked "w/ Audio"
+    - Avoid "Best Quality" unless you need max resolution
+    - Progressive streams always have audio
+    
+    **📋 If you see "HTTP Error 403: Forbidden":**
     
     🔄 **Quick Fixes:**
     - Wait 5-10 minutes before trying again
@@ -179,17 +186,21 @@ if toggle_video:
         "<h1 style='text-align: center;color: #FF0000;'>🎥 YouTube Video Downloader</h1>",
         unsafe_allow_html=True
     )
+    
+    # Audio guarantee information
+    st.info("🔊 **Audio Guarantee**: Choose options marked 'w/ Audio' to ensure your video has sound! This prevents the common issue of downloading video-only files.")
 
     video_link = st.text_input("Enter YouTube video URL:", key="video_url")
     
-    # Enhanced quality and format selection
-    col_q1, col_q2, col_q3 = st.columns(3)
+    # Enhanced quality and format selection with audio guarantee
+    col_q1, col_q2 = st.columns(2)
     with col_q1:
         video_format = st.selectbox("📹 Video Format:", ["mp4", "webm"], key="video_format", help="MP4 is more compatible, WebM may have better compression")
     with col_q2:
-        quality_option = st.selectbox("🎯 Quality:", ["Best Available (HD)", "1080p (Full HD)", "720p (HD)", "480p (SD)", "360p (Low)", "240p (Mobile)"], key="video_quality", help="Higher quality = larger file size")
-    with col_q3:
-        stream_type = st.selectbox("📺 Stream Type:", ["Progressive (Video+Audio)", "Adaptive (Video Only)"], key="stream_type", help="Progressive: All-in-one file, Adaptive: Higher quality but video only")
+        quality_option = st.selectbox("🎯 Quality:", ["Best w/ Audio (Recommended)", "720p w/ Audio", "480p w/ Audio", "360p w/ Audio", "Best Quality (May need audio merge)"], key="video_quality", help="Options with 'w/ Audio' guarantee sound!")
+    
+    # Audio handling option
+    st.info("� **Audio Guarantee**: All 'w/ Audio' options ensure your video has sound. 'Best Quality' may require audio merging for highest resolution.")
 
     download_video_btn = st.button("📥 Download Video", key="video_btn")
 
@@ -247,109 +258,124 @@ if toggle_video:
                 # Enhanced stream selection logic with better quality handling
                 selected_stream = None
                 
+                # NEW: Audio-guaranteed stream selection logic  
+                selected_stream = None
+                has_audio = True
+                
                 # Map quality options to resolution values
                 quality_map = {
-                    "Best Available (HD)": None,
-                    "1080p (Full HD)": "1080p",
-                    "720p (HD)": "720p", 
-                    "480p (SD)": "480p",
-                    "360p (Low)": "360p",
-                    "240p (Mobile)": "240p"
+                    "Best w/ Audio (Recommended)": None,
+                    "720p w/ Audio": "720p", 
+                    "480p w/ Audio": "480p",
+                    "360p w/ Audio": "360p",
+                    "Best Quality (May need audio merge)": None
                 }
                 
                 target_quality = quality_map.get(quality_option)
-                prefer_progressive = stream_type == "Progressive (Video+Audio)"
+                audio_guaranteed = "w/ Audio" in quality_option
                 
-                if quality_option == "Best Available (HD)":
-                    if prefer_progressive:
-                        # Get best progressive stream (video + audio combined)
-                        selected_stream = yt.streams.filter(
-                            file_extension=video_format, 
-                            progressive=True
-                        ).order_by('resolution').desc().first()
-                    
-                    # If no progressive or user prefers adaptive, get best adaptive video
-                    if not selected_stream or not prefer_progressive:
-                        selected_stream = yt.streams.filter(
-                            file_extension=video_format, 
-                            adaptive=True, 
-                            type='video'
-                        ).order_by('resolution').desc().first()
-                    
-                    # Final fallback
-                    if not selected_stream:
-                        selected_stream = yt.streams.get_highest_resolution()
-                        
-                else:
-                    # Specific quality requested
-                    if prefer_progressive:
-                        # Try progressive stream at target quality
+                if audio_guaranteed:
+                    # PRIORITY: Progressive streams (video + audio combined)
+                    if target_quality:
+                        # Try specific quality with audio
                         selected_stream = yt.streams.filter(
                             file_extension=video_format, 
                             progressive=True, 
                             res=target_quality
                         ).first()
-                    
-                    # If no progressive stream or user prefers adaptive
-                    if not selected_stream or not prefer_progressive:
-                        selected_stream = yt.streams.filter(
-                            file_extension=video_format, 
-                            adaptive=True, 
-                            type='video',
-                            res=target_quality
-                        ).first()
-                    
-                    # Fallback to closest available quality
-                    if not selected_stream:
-                        quality_fallback = ["720p", "480p", "360p", "1080p", "240p"]
-                        if target_quality in quality_fallback:
-                            quality_fallback.remove(target_quality)
-                        quality_fallback.insert(0, target_quality)
                         
-                        for fallback_quality in quality_fallback[1:]:  # Skip first (original target)
-                            if prefer_progressive:
+                        # Fallback to closest progressive quality
+                        if not selected_stream:
+                            quality_fallback = ["720p", "480p", "360p", "240p"]
+                            for fallback_quality in quality_fallback:
                                 selected_stream = yt.streams.filter(
                                     file_extension=video_format, 
                                     progressive=True, 
                                     res=fallback_quality
                                 ).first()
-                            else:
-                                selected_stream = yt.streams.filter(
-                                    file_extension=video_format, 
-                                    adaptive=True, 
-                                    type='video',
-                                    res=fallback_quality
-                                ).first()
-                            
-                            if selected_stream:
-                                st.warning(f"⚠️ {target_quality} not available. Using {fallback_quality} instead.")
-                                break
+                                if selected_stream:
+                                    st.warning(f"⚠️ {target_quality} with audio not available. Using {fallback_quality} with audio instead.")
+                                    break
+                    else:
+                        # Best available with audio
+                        selected_stream = yt.streams.filter(
+                            file_extension=video_format, 
+                            progressive=True
+                        ).order_by('resolution').desc().first()
                     
-                    # Final fallback
+                    # Final fallback: any progressive stream
                     if not selected_stream:
-                        selected_stream = yt.streams.get_highest_resolution()
-                        st.warning(f"⚠️ Requested quality not available. Using highest available quality.")
+                        selected_stream = yt.streams.filter(progressive=True).order_by('resolution').desc().first()
+                        if selected_stream:
+                            st.warning(f"⚠️ Requested format not available. Using {selected_stream.mime_type} with audio instead.")
+                
+                else:
+                    # "Best Quality" option - may be video-only
+                    selected_stream = yt.streams.filter(
+                        file_extension=video_format, 
+                        adaptive=True, 
+                        type='video'
+                    ).order_by('resolution').desc().first()
+                    
+                    if selected_stream and not selected_stream.is_progressive:
+                        has_audio = False
+                        st.warning("🔇 **No Audio Warning**: This high-quality stream contains video only. Audio will be missing!")
+                        
+                        # Offer alternative with audio
+                        audio_alternative = yt.streams.filter(
+                            file_extension=video_format, 
+                            progressive=True
+                        ).order_by('resolution').desc().first()
+                        
+                        if audio_alternative:
+                            if st.button("🔊 Switch to version WITH audio", key="switch_audio"):
+                                selected_stream = audio_alternative
+                                has_audio = True
+                                st.success("✅ Switched to version with audio!")
+                                st.rerun()
+                
+                # Final fallback if nothing found
+                if not selected_stream:
+                    selected_stream = yt.streams.get_highest_resolution()
+                    has_audio = selected_stream.is_progressive if selected_stream else False
 
                 if selected_stream:
                     file_size = selected_stream.filesize if hasattr(selected_stream, 'filesize') else 0
                     fps_info = f" @ {selected_stream.fps}fps" if hasattr(selected_stream, 'fps') and selected_stream.fps else ""
-                    stream_type_info = "Progressive" if selected_stream.is_progressive else "Adaptive"
                     
-                    st.success(f"✅ **Selected Stream:**")
-                    col_s1, col_s2, col_s3 = st.columns(3)
+                    # Audio status indicator
+                    if has_audio:
+                        st.success(f"✅ **Selected Stream with Audio:**")
+                        audio_status = "🔊 With Audio"
+                        audio_color = "green"
+                    else:
+                        st.error(f"🔇 **Selected Stream (NO AUDIO):**")
+                        audio_status = "🔇 Video Only"
+                        audio_color = "red"
+                    
+                    col_s1, col_s2, col_s3, col_s4 = st.columns(4)
                     with col_s1:
                         st.metric("🎯 Quality", f"{selected_stream.resolution or 'Default'}{fps_info}")
                     with col_s2:
                         st.metric("📁 File Size", format_file_size(file_size))
                     with col_s3:
-                        st.metric("📺 Type", stream_type_info)
+                        st.metric("� Audio", audio_status)
+                    with col_s4:
+                        st.metric("📺 Type", "Progressive" if selected_stream.is_progressive else "Adaptive")
                     
-                    if not selected_stream.is_progressive:
-                        st.warning("⚠️ **Note:** Adaptive streams contain video only. Audio will need to be downloaded separately if needed.")
+                    # Clear warning for video-only streams
+                    if not has_audio:
+                        st.error("⚠️ **IMPORTANT:** This video will have NO SOUND! Choose a 'w/ Audio' option instead.")
+                        
+                        # Don't allow download of video-only streams
+                        if st.button("🔊 I want version WITH audio instead", key="force_audio", type="primary"):
+                            st.rerun()
+                        st.stop()  # Prevent download of video-only content
 
-                    # Download with progress
+                    # Download with progress (only for streams with audio)
                     try:
-                        with st.spinner("Downloading video..."):
+                        download_label = "🔊 Downloading video with audio..." if has_audio else "📹 Downloading video (no audio)..."
+                        with st.spinner(download_label):
                             progress_bar = st.progress(0)
                             status_text = st.empty()
                             
@@ -360,18 +386,24 @@ if toggle_video:
                             progress_bar.progress(100)
                             status_text.text("Download completed!")
 
-                        # Add to history
-                        add_to_history("Video", yt.title, file_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                        # Add to history with audio status
+                        video_type = "Video (with Audio)" if has_audio else "Video (No Audio)"
+                        add_to_history(video_type, yt.title, file_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-                        # Provide download button
+                        # Provide download button with audio confirmation
+                        download_button_label = "🔊 Save Video (with Audio)" if has_audio else "📹 Save Video (NO AUDIO)"
                         with open(file_path, "rb") as f:
                             st.download_button(
-                                label="📥 Save Video to Device",
+                                label=download_button_label,
                                 data=f,
                                 file_name=file_name,
                                 mime="video/mp4"
                             )
-                        st.success("✅ Video download ready!")
+                        
+                        if has_audio:
+                            st.success("✅ Video with audio download ready! 🔊")
+                        else:
+                            st.warning("⚠️ Video downloaded but has NO AUDIO! 🔇")
                     
                     except Exception as download_error:
                         error_msg = str(download_error).lower()
