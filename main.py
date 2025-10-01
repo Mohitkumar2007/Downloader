@@ -589,23 +589,58 @@ if toggle_video:
                             
                             os.makedirs(download_path, exist_ok=True)
                             
-                            # Use yt-dlp's default smart format selection for maximum compatibility
+                            # Bulletproof download with multiple fallback strategies
                             audio_guaranteed = "w/ Audio" in quality_option
+                            
+                            # Try multiple format strategies in order until one works
+                            format_strategies = []
+                            
                             if audio_guaranteed:
-                                # Prioritize formats with audio, fallback to best available
-                                format_selector = 'best[acodec!=none]/best'
+                                format_strategies = [
+                                    'best[acodec!=none]',  # Best with audio
+                                    'best',                # Any best format
+                                    None                   # yt-dlp default
+                                ]
                             else:
-                                # Just get the best quality available
-                                format_selector = 'best'
+                                format_strategies = [
+                                    'best',                # Best quality
+                                    None                   # yt-dlp default
+                                ]
                             
-                            ydl_opts = {
-                                'format': format_selector,
-                                'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
-                                'noplaylist': True,
-                            }
+                            download_successful = False
                             
-                            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                                ydl.download([video_link])
+                            for i, format_selector in enumerate(format_strategies):
+                                try:
+                                    ydl_opts = {
+                                        'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
+                                        'noplaylist': True,
+                                    }
+                                    
+                                    # Only add format if specified (None means use yt-dlp default)
+                                    if format_selector:
+                                        ydl_opts['format'] = format_selector
+                                    
+                                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                                        ydl.download([video_link])
+                                    
+                                    download_successful = True
+                                    if format_selector:
+                                        st.success(f"✅ Downloaded using format: {format_selector}")
+                                    else:
+                                        st.success(f"✅ Downloaded using yt-dlp default format selection")
+                                    break
+                                    
+                                except Exception as e:
+                                    error_msg = str(e).lower()
+                                    if 'format' in error_msg and i < len(format_strategies) - 1:
+                                        # Try next format strategy
+                                        continue
+                                    else:
+                                        # Re-raise if it's the last strategy or not a format error
+                                        raise
+                            
+                            if not download_successful:
+                                raise Exception("All download strategies failed")
                                 
                             progress_bar.progress(100)
                             status_text.text("Download completed!")
@@ -668,17 +703,11 @@ if toggle_video:
                             
                             os.makedirs(download_path, exist_ok=True)
                             
-                            # Use yt-dlp's smart defaults
-                            audio_guaranteed = "w/ Audio" in quality_option
-                            if audio_guaranteed:
-                                format_selector = 'best[acodec!=none]/best'  # Prefer formats with audio
-                            else:
-                                format_selector = 'best'  # Best available quality
-                            
+                            # Final fallback - use absolute minimum requirements
                             ydl_opts = {
-                                'format': format_selector,
                                 'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
                                 'noplaylist': True,
+                                # No format specified - let yt-dlp use its default
                             }
                             
                             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -929,12 +958,12 @@ if toggle_batch:
                         try:
                             status_text.text(f"Processing {i+1}/{len(urls)}: {url}")
                             
-                            # Configure yt-dlp options for batch download
+                            # Configure yt-dlp options for batch download - bulletproof approach
                             if batch_format == "Video":
                                 ydl_opts = {
-                                    'format': 'best',
                                     'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
                                     'noplaylist': True,
+                                    # No format specified - let yt-dlp choose best available
                                 }
                             else:  # Audio
                                 ydl_opts = {
@@ -1037,12 +1066,12 @@ if toggle_batch:
                         try:
                             status_text.text(f"Downloading {i+1}/{len(urls)}")
                             
-                            # Configure yt-dlp options
+                            # Configure yt-dlp options - bulletproof approach
                             if playlist_format == "Video":
                                 ydl_opts = {
-                                    'format': 'best',
                                     'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
                                     'noplaylist': True,
+                                    # No format specified - maximum compatibility
                                 }
                             else:  # Audio
                                 ydl_opts = {
