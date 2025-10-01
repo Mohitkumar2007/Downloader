@@ -279,6 +279,10 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# --- Cloud Storage Warning ---
+if 'STREAMLIT_SHARING' in os.environ or 'STREAMLIT_CLOUD' in os.environ:
+    st.warning("☁️ **Cloud Deployment Notice**: This app is running on Streamlit Cloud with ephemeral storage. Downloaded files are temporary and will be deleted when the app restarts. Please download files immediately after processing!")
+
 # --- App Title ---
 st.markdown("""
 <div style='text-align: center; padding: 1rem 0;'>
