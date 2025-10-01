@@ -14,6 +14,9 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import platform
 from pathlib import Path
+import http.cookiejar
+import tempfile
+import uuid
 # --- Initialize session state ---
 if 'download_history' not in st.session_state:
     st.session_state.download_history = []
@@ -21,18 +24,60 @@ if 'dark_theme' not in st.session_state:
     st.session_state.dark_theme = False
 if 'last_request_time' not in st.session_state:
     st.session_state.last_request_time = 0
+if 'session_id' not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
+if 'request_count' not in st.session_state:
+    st.session_state.request_count = 0
 
 # --- Helper Functions ---
+def simulate_browser_visit():
+    """Simulate a browser visit to YouTube homepage before extraction"""
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+        }
+        
+        # Make a quick request to YouTube homepage
+        response = requests.get('https://www.youtube.com', headers=headers, timeout=10)
+        time.sleep(random.uniform(0.5, 1.5))  # Simulate reading time
+        return True
+    except:
+        return False
+
 def enforce_rate_limit(min_interval=2.0):
-    """Enforce a minimum time interval between requests to avoid rate limiting"""
+    """Enforce adaptive rate limiting based on request count and timing"""
     current_time = time.time()
     time_since_last = current_time - st.session_state.last_request_time
     
-    if time_since_last < min_interval:
-        sleep_time = min_interval - time_since_last + random.uniform(0.1, 0.5)
+    # Increase intervals based on request count to simulate human behavior
+    st.session_state.request_count += 1
+    adaptive_interval = min_interval + (st.session_state.request_count * 0.5)
+    
+    if time_since_last < adaptive_interval:
+        sleep_time = adaptive_interval - time_since_last + random.uniform(0.2, 1.0)
         time.sleep(sleep_time)
     
     st.session_state.last_request_time = time.time()
+
+def create_session_cookies():
+    """Create realistic browser cookies for session persistence"""
+    cookie_jar = http.cookiejar.CookieJar()
+    
+    # Simulate realistic YouTube session cookies
+    cookies = {
+        'CONSENT': f'YES+cb.{random.randint(20240101, 20241231)}-{random.randint(10, 99)}-p0.en+FX+{random.randint(100, 999)}',
+        'VISITOR_INFO1_LIVE': ''.join(random.choices('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', k=22)),
+        'YSC': ''.join(random.choices('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-', k=16)),
+        'PREF': f'f1={random.randint(50000000, 99999999)}&f6=8&hl=en&gl=US',
+    }
+    
+    return cookies
 
 def get_default_download_path():
     """Get the system's default Downloads folder"""
@@ -93,44 +138,112 @@ def get_video_info(url, max_retries=3):
             if attempt > 0:
                 time.sleep(random.uniform(1, 3))
             else:
+                # First-time request: simulate browser behavior
+                if st.session_state.request_count == 0:
+                    st.info("🌐 Establishing connection...")
+                    simulate_browser_visit()
+                
                 # Enforce rate limiting for all requests
                 enforce_rate_limit(min_interval=2.5)
             
-            # Generate randomized headers to avoid detection patterns
+            # Advanced user agent rotation with realistic versions
             user_agents = [
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0',
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:118.0) Gecko/20100101 Firefox/118.0',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36'
             ]
             
-            # Configure yt-dlp options for info extraction with enhanced anti-detection
+            # Create session cookies for this request
+            session_cookies = create_session_cookies()
+            
+            # Configure yt-dlp with maximum anti-detection measures
             ydl_opts = {
                 'quiet': True,
                 'no_warnings': True,
                 'extract_flat': False,
-                # Enhanced anti-detection measures
+                'ignoreerrors': False,
+                
+                # Core anti-detection
                 'user_agent': random.choice(user_agents),
                 'referer': 'https://www.youtube.com/',
-                'headers': {
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.9',
+                
+                # Advanced HTTP headers simulation
+                'http_headers': {
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9,es;q=0.8',
                     'Accept-Encoding': 'gzip, deflate, br',
+                    'Cache-Control': 'max-age=0',
                     'DNT': '1',
                     'Connection': 'keep-alive',
                     'Upgrade-Insecure-Requests': '1',
                     'Sec-Fetch-Dest': 'document',
                     'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-Site': 'cross-site',
+                    'Sec-Fetch-Site': 'same-origin',
+                    'Sec-Fetch-User': '?1',
+                    'Sec-Ch-Ua': '"Chromium";v="118", "Google Chrome";v="118", "Not=A?Brand";v="99"',
+                    'Sec-Ch-Ua-Mobile': '?0',
+                    'Sec-Ch-Ua-Platform': '"Windows"',
                 },
-                'sleep_interval': random.uniform(0.5, 1.5),  # Random delay between requests
-                'max_sleep_interval': 3
+                
+                # Cookie handling
+                'cookiefile': None,  # Don't save cookies to file
+                
+                # Network behavior simulation
+                'sleep_interval': random.uniform(1.0, 3.0),
+                'max_sleep_interval': 5,
+                'socket_timeout': 30,
+                
+                # Alternative extraction methods
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['android', 'web'],
+                        'player_skip': ['configs'],
+                    }
+                },
+                
+                # Retry configuration
+                'retries': 3,
+                'fragment_retries': 3,
             }
             
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                return info, None
-            
+            try:
+                # Try primary extraction method
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    return info, None
+                    
+            except Exception as primary_error:
+                # If primary method fails, try alternative extraction strategies
+                fallback_strategies = [
+                    # Strategy 1: Android client only
+                    {**ydl_opts, 'extractor_args': {'youtube': {'player_client': ['android']}}},
+                    # Strategy 2: Web client with different headers
+                    {**ydl_opts, 'extractor_args': {'youtube': {'player_client': ['web']}}, 
+                     'http_headers': {**ydl_opts['http_headers'], 'X-YouTube-Client-Name': '1', 'X-YouTube-Client-Version': '2.20231101.00.00'}},
+                    # Strategy 3: Minimal headers approach
+                    {**ydl_opts, 'http_headers': {'User-Agent': random.choice(user_agents)}, 'extractor_args': {}}
+                ]
+                
+                for i, fallback_opts in enumerate(fallback_strategies):
+                    try:
+                        st.info(f"🔄 Trying alternative extraction method {i+1}/3...")
+                        time.sleep(random.uniform(2, 4))  # Wait between attempts
+                        
+                        with yt_dlp.YoutubeDL(fallback_opts) as ydl:
+                            info = ydl.extract_info(url, download=False)
+                            st.success(f"✅ Success with alternative method {i+1}!")
+                            return info, None
+                            
+                    except Exception as fallback_error:
+                        if i == len(fallback_strategies) - 1:  # Last attempt
+                            raise primary_error  # Raise original error
+                        continue
+                        
+                # This should not be reached, but just in case
+                raise primary_error
+                
         except Exception as e:
             error_msg = str(e).lower()
             if "403" in error_msg or "forbidden" in error_msg:
@@ -141,12 +254,18 @@ def get_video_info(url, max_retries=3):
                     time.sleep(delay)
                     continue
                 else:
-                    return None, "❌ **403 Forbidden Error**: This video may be restricted, private, or YouTube is blocking requests. Try:\n\n" \
-                                "1. **Wait a few minutes** and try again\n" \
-                                "2. **Check if the video is public** and available\n" \
-                                "3. **Try a different video** to test\n" \
-                                "4. **Use a VPN** if you're in a restricted region\n\n" \
-                                "**Note**: YouTube actively blocks automated downloads. This is normal behavior."
+                    return None, "❌ **403 Forbidden Error**: YouTube's anti-bot system is blocking requests.\n\n" \
+                                "🛡️ **Advanced Protection Detected** - This happens when:\n" \
+                                "• Multiple attempts trigger rate limiting\n" \
+                                "• YouTube detects automated patterns\n" \
+                                "• Regional restrictions are in place\n\n" \
+                                "🚀 **Try these solutions:**\n" \
+                                "1. **Wait 10-15 minutes** for cooldown\n" \
+                                "2. **Try audio-only** downloads first\n" \
+                                "3. **Use different videos** to reset detection\n" \
+                                "4. **Clear browser data** and refresh\n" \
+                                "5. **Try during off-peak hours** (late night/early morning)\n\n" \
+                                "💡 **Pro tip**: Multiple failed attempts increase detection. Space out your downloads!"
             elif "private" in error_msg or "unavailable" in error_msg:
                 return None, "❌ **Video Unavailable**: This video is private, deleted, or restricted in your region."
             elif "age" in error_msg:
