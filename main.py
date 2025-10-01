@@ -479,7 +479,7 @@ if toggle_video:
                 with col_thumb_center:
                     thumbnail_url = video_info.get('thumbnail', '')
                     if thumbnail_url:
-                        st.image(thumbnail_url, caption="🖼️ Video Thumbnail", use_container_width=True)
+                        st.image(thumbnail_url, caption="🖼️ Video Thumbnail", use_column_width=True)
 
                 # Show available formats
                 st.markdown("---")
@@ -544,64 +544,18 @@ if toggle_video:
                                 height = f.get('height', 'N/A')
                                 st.write(f"{i+1}. {ext} - {height}p - Video: {vcodec != 'none'} - Audio: {acodec != 'none'}")
                 
-                # Map quality options to selection logic
-                quality_map = {
-                    "Best w/ Audio (Recommended)": "best_with_audio",
-                    "720p w/ Audio": "720p_with_audio", 
-                    "480p w/ Audio": "480p_with_audio",
-                    "360p w/ Audio": "360p_with_audio",
-                    "Best Quality (May need audio merge)": "best_quality"
-                }
+                # Simplified approach - assume audio is available for "w/ Audio" options
+                # This is more reliable in cloud environments
+                has_audio = "w/ Audio" in quality_option
                 
-                selection_type = quality_map.get(quality_option, "best_with_audio")
-                selected_format = None
-                has_audio = True
+                # Show format info if we have it
+                if video_formats:
+                    # Show best available quality
+                    best_quality = video_formats[0][0] if video_formats else "Unknown"
+                    st.info(f"� Best available quality: {best_quality}p")
                 
-                # Select format based on user choice
-                if selection_type == "best_with_audio":
-                    # Find best quality format with audio
-                    for height, info, fmt, audio, ext in video_formats:
-                        if audio:
-                            selected_format = fmt
-                            has_audio = audio
-                            break
-                elif selection_type.endswith("_with_audio"):
-                    # Find specific quality with audio
-                    target_height = int(selection_type.split('p')[0])
-                    for height, info, fmt, audio, ext in video_formats:
-                        if audio and height <= target_height:
-                            selected_format = fmt
-                            has_audio = audio
-                            break
-                    
-                    # Fallback to any format with audio if target not found
-                    if not selected_format:
-                        for height, info, fmt, audio, ext in video_formats:
-                            if audio:
-                                selected_format = fmt
-                                has_audio = audio
-                                st.warning(f"⚠️ {target_height}p with audio not available. Using {height}p with audio instead.")
-                                break
-                else:  # best_quality
-                    # Get highest quality (may not have audio)
-                    if video_formats:
-                        selected_format = video_formats[0][2]
-                        has_audio = video_formats[0][3]
-                        if not has_audio:
-                            st.warning("🔇 **No Audio Warning**: This high-quality stream contains video only. Audio will be missing!")
-                
-                # Final fallback: use yt-dlp's default format selection if no format found
-                if not selected_format and video_formats:
-                    # Just use the first available format
-                    selected_format = video_formats[0][2]  
-                    has_audio = video_formats[0][3]
-                    st.info("ℹ️ Using best available format.")
-
-                if selected_format:
-                    file_size = selected_format.get('filesize', 0)
-                    height = selected_format.get('height', 0)
-                    fps = selected_format.get('fps', 0)
-                    fps_info = f" @ {fps}fps" if fps else ""
+                # Always proceed with download for "w/ Audio" options
+                # yt-dlp will handle format selection intelligently
                     
                     # Audio status indicator
                     if has_audio:
@@ -611,15 +565,11 @@ if toggle_video:
                         st.error(f"🔇 **Selected Format (NO AUDIO):**")
                         audio_status = "🔇 Video Only"
                     
-                    col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+                    col_s1, col_s2 = st.columns(2)
                     with col_s1:
-                        st.metric("🎯 Quality", f"{height}p{fps_info}" if height else "Default")
+                        st.metric("🎯 Selected Option", quality_option)
                     with col_s2:
-                        st.metric("📁 File Size", format_file_size(file_size) if file_size else "Unknown")
-                    with col_s3:
-                        st.metric("🔊 Audio", audio_status)
-                    with col_s4:
-                        st.metric("📺 Format", selected_format.get('ext', 'mp4').upper())
+                        st.metric("🔊 Audio Status", audio_status)
                     
                     # Clear warning for video-only streams
                     if not has_audio:
@@ -639,20 +589,15 @@ if toggle_video:
                             
                             os.makedirs(download_path, exist_ok=True)
                             
-                            # Configure yt-dlp options for download
-                            if selected_format and 'format_id' in selected_format:
-                                # Use specific format if found
-                                format_selector = str(selected_format['format_id'])
+                            # Configure yt-dlp options for download - simplified for cloud compatibility
+                            audio_guaranteed = "w/ Audio" in quality_option
+                            if audio_guaranteed:
+                                if video_format == 'mp4':
+                                    format_selector = 'best[ext=mp4][acodec!=none]/best[acodec!=none]/best'
+                                else:  # webm
+                                    format_selector = 'best[ext=webm][acodec!=none]/best[acodec!=none]/best'
                             else:
-                                # Fallback to yt-dlp's smart selection
-                                audio_guaranteed = "w/ Audio" in quality_option
-                                if audio_guaranteed:
-                                    if video_format == 'mp4':
-                                        format_selector = 'best[ext=mp4][acodec!=none]/best[acodec!=none]/best'
-                                    else:  # webm
-                                        format_selector = 'best[ext=webm][acodec!=none]/best[acodec!=none]/best'
-                                else:
-                                    format_selector = 'best[ext=' + video_format + ']/best'
+                                format_selector = 'best[ext=' + video_format + ']/best'
                             
                             ydl_opts = {
                                 'format': format_selector,
@@ -834,7 +779,7 @@ if toggle_audio:
                 with col_thumb_center:
                     thumbnail_url = audio_info.get('thumbnail', '')
                     if thumbnail_url:
-                        st.image(thumbnail_url, caption="🎵 Audio Thumbnail", use_container_width=True)
+                        st.image(thumbnail_url, caption="🎵 Audio Thumbnail", use_column_width=True)
 
                 # Enhanced audio format selection using yt-dlp
                 st.markdown("---")
@@ -1228,7 +1173,7 @@ if toggle_image:
                                 st.info(f"🔄 Resized to: {new_size[0]}x{new_size[1]} pixels")
                             
                             # Display image
-                            st.image(img, caption="Downloaded Image", use_container_width=True)
+                            st.image(img, caption="Downloaded Image", use_column_width=True)
                             
                             # Convert format if needed
                             file_name = os.path.basename(urlparse(image_link).path) or "downloaded_image"
@@ -1298,7 +1243,7 @@ if toggle_image:
                         image_data = response.content
                         img = Image.open(io.BytesIO(image_data))
                         
-                        st.image(img, caption=f"Thumbnail: {title}", use_container_width=True)
+                        st.image(img, caption=f"Thumbnail: {title}", use_column_width=True)
                         
                         file_name = f"{title}_{thumb_quality}.jpg"
                         # Clean filename
