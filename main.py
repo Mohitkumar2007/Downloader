@@ -479,7 +479,7 @@ if toggle_video:
                 with col_thumb_center:
                     thumbnail_url = video_info.get('thumbnail', '')
                     if thumbnail_url:
-                        st.image(thumbnail_url, caption="🖼️ Video Thumbnail", use_column_width=True)
+                        st.image(thumbnail_url, caption="🖼️ Video Thumbnail", use_container_width=True)
 
                 # Show available formats
                 st.markdown("---")
@@ -778,7 +778,7 @@ if toggle_audio:
                 with col_thumb_center:
                     thumbnail_url = audio_info.get('thumbnail', '')
                     if thumbnail_url:
-                        st.image(thumbnail_url, caption="🎵 Audio Thumbnail", use_column_width=True)
+                        st.image(thumbnail_url, caption="🎵 Audio Thumbnail", use_container_width=True)
 
                 # Enhanced audio format selection using yt-dlp
                 st.markdown("---")
@@ -1172,7 +1172,7 @@ if toggle_image:
                                 st.info(f"🔄 Resized to: {new_size[0]}x{new_size[1]} pixels")
                             
                             # Display image
-                            st.image(img, caption="Downloaded Image", use_column_width=True)
+                            st.image(img, caption="Downloaded Image", use_container_width=True)
                             
                             # Convert format if needed
                             file_name = os.path.basename(urlparse(image_link).path) or "downloaded_image"
@@ -1242,7 +1242,7 @@ if toggle_image:
                         image_data = response.content
                         img = Image.open(io.BytesIO(image_data))
                         
-                        st.image(img, caption=f"Thumbnail: {title}", use_column_width=True)
+                        st.image(img, caption=f"Thumbnail: {title}", use_container_width=True)
                         
                         file_name = f"{title}_{thumb_quality}.jpg"
                         # Clean filename
