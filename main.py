@@ -19,8 +19,21 @@ if 'download_history' not in st.session_state:
     st.session_state.download_history = []
 if 'dark_theme' not in st.session_state:
     st.session_state.dark_theme = False
+if 'last_request_time' not in st.session_state:
+    st.session_state.last_request_time = 0
 
 # --- Helper Functions ---
+def enforce_rate_limit(min_interval=2.0):
+    """Enforce a minimum time interval between requests to avoid rate limiting"""
+    current_time = time.time()
+    time_since_last = current_time - st.session_state.last_request_time
+    
+    if time_since_last < min_interval:
+        sleep_time = min_interval - time_since_last + random.uniform(0.1, 0.5)
+        time.sleep(sleep_time)
+    
+    st.session_state.last_request_time = time.time()
+
 def get_default_download_path():
     """Get the system's default Downloads folder"""
     try:
@@ -76,15 +89,42 @@ def get_video_info(url, max_retries=3):
     """Get video information using yt-dlp with error handling and retries"""
     for attempt in range(max_retries):
         try:
-            # Add random delay to avoid rate limiting
+            # Add rate limiting and random delay to avoid detection
             if attempt > 0:
                 time.sleep(random.uniform(1, 3))
+            else:
+                # Enforce rate limiting for all requests
+                enforce_rate_limit(min_interval=2.5)
             
-            # Configure yt-dlp options for info extraction
+            # Generate randomized headers to avoid detection patterns
+            user_agents = [
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+            ]
+            
+            # Configure yt-dlp options for info extraction with enhanced anti-detection
             ydl_opts = {
                 'quiet': True,
                 'no_warnings': True,
                 'extract_flat': False,
+                # Enhanced anti-detection measures
+                'user_agent': random.choice(user_agents),
+                'referer': 'https://www.youtube.com/',
+                'headers': {
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'DNT': '1',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'cross-site',
+                },
+                'sleep_interval': random.uniform(0.5, 1.5),  # Random delay between requests
+                'max_sleep_interval': 3
             }
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -95,8 +135,10 @@ def get_video_info(url, max_retries=3):
             error_msg = str(e).lower()
             if "403" in error_msg or "forbidden" in error_msg:
                 if attempt < max_retries - 1:
-                    st.warning(f"⚠️ Attempt {attempt + 1} failed (403 Forbidden). Retrying in {2 + attempt} seconds...")
-                    time.sleep(2 + attempt)
+                    # Progressive backoff with randomization to avoid detection patterns
+                    delay = (3 + attempt * 2) + random.uniform(0.5, 2.0)
+                    st.warning(f"⚠️ Attempt {attempt + 1} failed (403 Forbidden). Retrying in {delay:.1f} seconds...")
+                    time.sleep(delay)
                     continue
                 else:
                     return None, "❌ **403 Forbidden Error**: This video may be restricted, private, or YouTube is blocking requests. Try:\n\n" \
@@ -614,6 +656,17 @@ if toggle_video:
                                     ydl_opts = {
                                         'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
                                         'noplaylist': True,
+                                        # Anti-detection measures
+                                        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                                        'referer': 'https://www.youtube.com/',
+                                        'headers': {
+                                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                                            'Accept-Language': 'en-us,en;q=0.5',
+                                            'Accept-Encoding': 'gzip, deflate',
+                                            'DNT': '1',
+                                            'Connection': 'keep-alive',
+                                            'Upgrade-Insecure-Requests': '1',
+                                        }
                                     }
                                     
                                     # Only add format if specified (None means use yt-dlp default)
@@ -689,8 +742,12 @@ if toggle_video:
                                    "YouTube has blocked this download request. This happens when:\n"
                                    "- YouTube detects automated downloading\n"
                                    "- The video has download restrictions\n"
-                                   "- Too many requests from your IP\n\n"
-                                   "**Try again later or use a different video.**")
+                                   "- Too many requests from your location\n\n"
+                                   "💡 **Solutions to try:**\n"
+                                   "- Wait 5-10 minutes before trying again\n"
+                                   "- Try a different video first\n"
+                                   "- Use the audio-only download option\n"
+                                   "- Try during off-peak hours")
                         else:
                             st.error(f"❌ Download failed: {download_error}")
                 else:
