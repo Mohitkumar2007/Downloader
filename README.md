@@ -38,8 +38,8 @@ A powerful, feature-rich YouTube video and audio downloader built with Streamlit
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/yourusername/youtube-video-downloader.git
-   cd youtube-video-downloader
+   git clone https://github.com/Mohitkumar2007/Downloader.git
+   cd Downloader
    ```
 
 2. **Create a virtual environment:**
@@ -77,22 +77,28 @@ A powerful, feature-rich YouTube video and audio downloader built with Streamlit
 
 ## 📋 Requirements
 
-- Python 3.7+
-- Streamlit
-- pytubefix
-- Pillow (PIL)
-- requests
+- Python 3.8+
+- Streamlit 1.50.0
+- yt-dlp 2024.12.13
+- Pillow 10.4.0
+- requests 2.32.3
+- urllib3 2.2.3
+- Additional dependencies (see requirements.txt)
 
 ## 📁 Project Structure
 
 ```
-youtube-video-downloader/
-├── main.py              # Main application file
+Downloader/
+├── main.py              # Main Streamlit application
+├── test_ytdlp.py       # Test file for yt-dlp functionality
 ├── requirements.txt     # Python dependencies
 ├── README.md           # Project documentation
-├── .gitignore         # Git ignore file
-├── downloads/         # Downloaded files (not tracked)
-└── venv/             # Virtual environment (not tracked)
+├── LICENSE             # MIT License
+├── pyvenv.cfg          # Virtual environment configuration
+├── downloads/          # Downloaded files directory
+├── Scripts/            # Virtual environment scripts
+├── Lib/               # Virtual environment libraries
+└── Include/           # Virtual environment headers
 ```
 
 ## 🤝 Contributing
@@ -114,9 +120,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- [pytubefix](https://github.com/JuanBindez/pytubefix) for YouTube downloading capabilities
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) for powerful YouTube downloading capabilities
 - [Streamlit](https://streamlit.io/) for the amazing web framework
 - [Pillow](https://pillow.readthedocs.io/) for image processing
+- [PyArrow](https://arrow.apache.org/docs/python/) for efficient data processing
 
 ## ⚠️ Disclaimer
 

@@ -1,5 +1,5 @@
 import streamlit as st
-from pytubefix import YouTube, Playlist
+import yt_dlp
 import os
 import requests
 from PIL import Image
@@ -14,7 +14,6 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import platform
 from pathlib import Path
-
 # --- Initialize session state ---
 if 'download_history' not in st.session_state:
     st.session_state.download_history = []
@@ -73,20 +72,24 @@ def create_robust_session():
     session.headers.update({'User-Agent': random.choice(user_agents)})
     return session
 
-def create_youtube_object(url, max_retries=3):
-    """Create YouTube object with error handling and retries"""
+def get_video_info(url, max_retries=3):
+    """Get video information using yt-dlp with error handling and retries"""
     for attempt in range(max_retries):
         try:
             # Add random delay to avoid rate limiting
             if attempt > 0:
                 time.sleep(random.uniform(1, 3))
             
-            # Create YouTube object with custom session
-            yt = YouTube(url)
+            # Configure yt-dlp options for info extraction
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': False,
+            }
             
-            # Test if we can access basic info
-            _ = yt.title  # This will trigger the actual request
-            return yt, None
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                return info, None
             
         except Exception as e:
             error_msg = str(e).lower()
@@ -128,6 +131,33 @@ def add_to_history(item_type, title, file_name, download_time):
     if len(st.session_state.download_history) > 50:  # Keep only last 50 downloads
         st.session_state.download_history = st.session_state.download_history[:50]
 
+def show_mobile_download_success(file_name, file_type):
+    """Show mobile-friendly download success message"""
+    st.markdown(f"""
+    <div style='
+        background: linear-gradient(135deg, #00C851 0%, #007E33 100%);
+        padding: 1.5rem;
+        border-radius: 15px;
+        text-align: center;
+        margin: 1rem 0;
+        box-shadow: 0 4px 15px rgba(0,200,81,0.3);
+    '>
+        <h3 style='color: white; margin: 0 0 0.5rem 0;'>🎉 Download Successful!</h3>
+        <p style='color: #E8F5E8; margin: 0.5rem 0; font-size: 16px;'>
+            <strong>{file_type}:</strong> {file_name[:30]}{'...' if len(file_name) > 30 else ''}
+        </p>
+        <div style='background: rgba(255,255,255,0.2); padding: 10px; border-radius: 8px; margin: 10px 0;'>
+            <p style='color: white; margin: 0; font-size: 14px;'>
+                📱 <strong>Mobile:</strong> File saved to Downloads folder<br>
+                💻 <strong>Desktop:</strong> Check your Downloads directory
+            </p>
+        </div>
+        <p style='color: #E8F5E8; margin: 0; font-size: 12px;'>
+            Tap the download button below to save to your device
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
 def format_file_size(size_bytes):
     """Convert bytes to human readable format"""
     if size_bytes == 0:
@@ -149,18 +179,131 @@ def format_duration(seconds):
     else:
         return f"{minutes:02d}:{seconds:02d}"
 
+# --- Mobile-responsive CSS ---
+st.markdown("""
+<style>
+    /* Mobile-first responsive design */
+    .stApp {
+        max-width: 100%;
+        padding: 0.5rem;
+    }
+    
+    /* Mobile-friendly button styling */
+    .stButton > button {
+        width: 100%;
+        border-radius: 20px;
+        border: none;
+        padding: 0.75rem 1rem;
+        font-size: 16px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+    
+    /* Responsive columns for mobile */
+    @media (max-width: 768px) {
+        .row-widget.stHorizontal {
+            flex-direction: column;
+        }
+        
+        .stButton > button {
+            margin-bottom: 0.5rem;
+        }
+        
+        .stSelectbox, .stTextInput {
+            margin-bottom: 1rem;
+        }
+        
+        /* Make metrics stack vertically on mobile */
+        .metric-container {
+            display: flex;
+            flex-direction: column;
+        }
+    }
+    
+    /* Improve text input for mobile */
+    .stTextInput > div > div > input {
+        font-size: 16px;
+        padding: 12px;
+        border-radius: 10px;
+    }
+    
+    /* Better textarea for mobile */
+    .stTextArea textarea {
+        font-size: 16px;
+        padding: 12px;
+        border-radius: 10px;
+        min-height: 120px;
+    }
+    
+    /* Responsive images */
+    .stImage {
+        max-width: 100%;
+        height: auto;
+    }
+    
+    /* Mobile-friendly expanders */
+    .streamlit-expanderHeader {
+        font-size: 16px;
+        padding: 12px;
+    }
+    
+    /* Better spacing for mobile */
+    .element-container {
+        margin-bottom: 1rem;
+    }
+    
+    /* Responsive sidebar */
+    .css-1d391kg {
+        padding: 1rem 0.5rem;
+    }
+    
+    /* Download button styling */
+    .download-button {
+        background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
+        color: white;
+        border: none;
+        padding: 15px 25px;
+        border-radius: 25px;
+        font-size: 16px;
+        font-weight: bold;
+        cursor: pointer;
+        width: 100%;
+        margin: 10px 0;
+        transition: all 0.3s ease;
+    }
+    
+    .download-button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # --- App Title ---
-st.title("🎬 Advanced Downloader for Chethana")
+st.markdown("""
+<div style='text-align: center; padding: 1rem 0;'>
+    <h1 style='color: #FF4B4B; font-size: clamp(1.5rem, 5vw, 2.5rem); margin-bottom: 0.5rem;'>🎬 Advanced Downloader</h1>
+</div>
+""", unsafe_allow_html=True)
 
 # --- Theme Toggle ---
 col_theme1, col_theme2, col_theme3 = st.columns([1, 1, 4])
 with col_theme1:
-    if st.button("🌙" if not st.session_state.dark_theme else "☀️"):
+    if st.button("🌙" if not st.session_state.dark_theme else "☀️", help="Toggle dark/light theme"):
         st.session_state.dark_theme = not st.session_state.dark_theme
         st.rerun()
 
 # --- Download Path Settings ---
 st.sidebar.header("⚙️ Settings")
+
+# Mobile-friendly sidebar notice
+st.sidebar.markdown("""
+<div style='background: #f0f2f6; padding: 10px; border-radius: 8px; margin-bottom: 1rem;'>
+    <p style='margin: 0; font-size: 12px; color: #666;'>
+        📱 <strong>Mobile Tip:</strong> Swipe from left edge to access settings
+    </p>
+</div>
+""", unsafe_allow_html=True)
 
 # Get system default Downloads folder
 default_downloads = get_default_download_path()
@@ -193,34 +336,32 @@ else:
 st.sidebar.markdown(f"**📥 Files will be saved to:**\n`{download_path}`")
 
 # --- Troubleshooting Section ---
-with st.sidebar.expander("🛠️ Troubleshooting Guide"):
+st.sidebar.markdown("---")
+with st.sidebar.expander("🛠️ Troubleshooting Guide", expanded=False):
     st.markdown("""
     **🔇 No Audio in Downloaded Video?**
     
     ✅ **Solution:**
     - Choose options marked "w/ Audio"
     - Avoid "Best Quality" unless you need max resolution
-    - Progressive streams always have audio
     
-    **📋 If you see "HTTP Error 403: Forbidden":**
+    **📋 HTTP Error 403: Forbidden**
     
     🔄 **Quick Fixes:**
     - Wait 5-10 minutes before trying again
     - Try a different video first
     - Copy URL directly from YouTube
-    - Check if video is public/available
     
     📋 **Why this happens:**
     - YouTube blocks automated downloads
     - Too many requests from your IP
     - Video has regional restrictions
-    - Video is private/deleted/age-restricted
     
-    💡 **Tips:**
-    - Use shorter, older videos first
-    - Avoid popular/trending videos
-    - Don't download too many videos quickly
-    - Try using a VPN if region-locked
+    💡 **Mobile Tips:**
+    - Use Wi-Fi for better downloads
+    - Download one video at a time
+    - Paste URLs carefully (long-press)
+    - Files save to Downloads automatically
     """)
 
 st.sidebar.markdown("---")
@@ -229,17 +370,32 @@ st.sidebar.info("🔥 **Pro Tip**: If downloads fail, try waiting a few minutes 
 # --- Download Location Info ---
 st.info(f"📂 **Files will be saved to your Downloads folder:** `{os.path.basename(download_path)}`")
 
+# --- Mobile-specific help ---
+st.markdown("""
+<div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 1rem; border-radius: 10px; margin: 1rem 0;'>
+    <h4 style='color: white; margin: 0 0 0.5rem 0;'>📱 Mobile Users Guide</h4>
+    <div style='color: #f0f0f0; font-size: 14px;'>
+        <p style='margin: 0.3rem 0;'>✅ <strong>Paste URLs:</strong> Long-press in URL field to paste YouTube links</p>
+        <p style='margin: 0.3rem 0;'>✅ <strong>Download files:</strong> Tap download button to save to your device</p>
+        <p style='margin: 0.3rem 0;'>✅ <strong>Audio guaranteed:</strong> Choose "w/ Audio" options for video with sound</p>
+        <p style='margin: 0.3rem 0;'>✅ <strong>File location:</strong> Files save to your Downloads folder automatically</p>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
 # --- Toggle options ---
 st.header("📥 Choose Download Type")
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    toggle_video = st.checkbox("🎥 Download Video")
-with col2:
-    toggle_audio = st.checkbox("🎵 Audio Only")
-with col3:
-    toggle_image = st.checkbox("🖼️ Download Image")
-with col4:
-    toggle_batch = st.checkbox("📚 Batch Download")
+
+# Mobile-responsive layout for download type selection
+if st.container():
+    # For mobile: stack vertically, for desktop: show in columns
+    col1, col2 = st.columns(2)
+    with col1:
+        toggle_video = st.checkbox("🎥 Download Video", help="Download YouTube videos with audio")
+        toggle_image = st.checkbox("🖼️ Download Image", help="Download images or YouTube thumbnails")
+    with col2:
+        toggle_audio = st.checkbox("🎵 Audio Only", help="Extract audio from YouTube videos")
+        toggle_batch = st.checkbox("📚 Batch Download", help="Download multiple videos or playlists")
 
 # --- VIDEO DOWNLOADER ---
 if toggle_video:
@@ -251,24 +407,35 @@ if toggle_video:
     # Audio guarantee information
     st.info("🔊 **Audio Guarantee**: Choose options marked 'w/ Audio' to ensure your video has sound! This prevents the common issue of downloading video-only files.")
 
-    video_link = st.text_input("Enter YouTube video URL:", key="video_url")
+    video_link = st.text_input("Enter YouTube video URL:", key="video_url", placeholder="https://www.youtube.com/watch?v=...")
     
-    # Enhanced quality and format selection with audio guarantee
-    col_q1, col_q2 = st.columns(2)
-    with col_q1:
-        video_format = st.selectbox("📹 Video Format:", ["mp4", "webm"], key="video_format", help="MP4 is more compatible, WebM may have better compression")
-    with col_q2:
-        quality_option = st.selectbox("🎯 Quality:", ["Best w/ Audio (Recommended)", "720p w/ Audio", "480p w/ Audio", "360p w/ Audio", "Best Quality (May need audio merge)"], key="video_quality", help="Options with 'w/ Audio' guarantee sound!")
+    # Enhanced quality and format selection with audio guarantee (mobile-responsive)
+    st.markdown("### 🎯 Video Settings")
+    
+    # Stack vertically on mobile for better UX
+    video_format = st.selectbox(
+        "📹 Video Format:", 
+        ["mp4", "webm"], 
+        key="video_format", 
+        help="MP4 is more compatible, WebM may have better compression"
+    )
+    
+    quality_option = st.selectbox(
+        "🎯 Quality:", 
+        ["Best w/ Audio (Recommended)", "720p w/ Audio", "480p w/ Audio", "360p w/ Audio", "Best Quality (May need audio merge)"], 
+        key="video_quality", 
+        help="Options with 'w/ Audio' guarantee sound!"
+    )
     
     # Audio handling option
     st.info("� **Audio Guarantee**: All 'w/ Audio' options ensure your video has sound. 'Best Quality' may require audio merging for highest resolution.")
 
-    download_video_btn = st.button("📥 Download Video", key="video_btn")
+    download_video_btn = st.button("📥 Download Video", key="video_btn", use_container_width=True, type="primary")
 
     if download_video_btn and video_link:
         # Enhanced error handling with retries
         with st.spinner("🔍 Fetching video information... (This may take a moment)"):
-            yt, error_msg = create_youtube_object(video_link)
+            video_info, error_msg = get_video_info(video_link)
         
         if error_msg:
             st.error(error_msg)
@@ -280,221 +447,175 @@ if toggle_video:
         else:
             try:
                 # Display video info and thumbnail with better layout
-                st.subheader(f"📺 {yt.title}")
+                st.subheader(f"📺 {video_info.get('title', 'Unknown Title')}")
                 
                 # Video information in organized columns
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("👀 Views", f"{yt.views:,}" if yt.views else "N/A")
-                    st.metric("⏱️ Duration", format_duration(yt.length))
+                    views = video_info.get('view_count', 0)
+                    st.metric("👀 Views", f"{views:,}" if views else "N/A")
+                    duration = video_info.get('duration', 0)
+                    st.metric("⏱️ Duration", format_duration(duration) if duration else "N/A")
                 with col2:
-                    st.metric("👤 Channel", yt.author)
-                    st.metric("📅 Upload Date", yt.publish_date.strftime("%Y-%m-%d") if yt.publish_date else "N/A")
+                    uploader = video_info.get('uploader', 'Unknown')
+                    st.metric("👤 Channel", uploader)
+                    upload_date = video_info.get('upload_date', '')
+                    if upload_date:
+                        formatted_date = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}"
+                        st.metric("📅 Upload Date", formatted_date)
+                    else:
+                        st.metric("📅 Upload Date", "N/A")
                 with col3:
-                    st.metric("📊 Rating", f"{yt.rating}/5" if yt.rating else "N/A")
+                    like_count = video_info.get('like_count', 0)
+                    st.metric("� Likes", f"{like_count:,}" if like_count else "N/A")
                 
                 # Thumbnail in separate section with proper spacing
                 st.markdown("---")
                 col_thumb_center, col_empty1, col_empty2 = st.columns([2, 1, 1])
                 with col_thumb_center:
-                    st.image(yt.thumbnail_url, caption="🖼️ Video Thumbnail", use_column_width=True)
+                    thumbnail_url = video_info.get('thumbnail', '')
+                    if thumbnail_url:
+                        st.image(thumbnail_url, caption="🖼️ Video Thumbnail", use_column_width=True)
 
-                # Show available streams with better quality selection
+                # Show available formats
                 st.markdown("---")
-                st.subheader("🎥 Available Video Streams")
+                st.subheader("🎥 Available Video Formats")
                 
-                # Get all available streams
-                all_streams = yt.streams.filter(file_extension=video_format, type='video')
+                # Get available formats from video info
+                formats = video_info.get('formats', [])
                 
-                # Display available qualities
-                available_qualities = []
-                for stream in all_streams:
-                    if stream.resolution:
-                        quality_info = f"{stream.resolution} ({stream.fps}fps) - {format_file_size(stream.filesize) if hasattr(stream, 'filesize') else 'Unknown size'}"
-                        available_qualities.append((stream.resolution, quality_info, stream))
+                # Filter and organize formats (more flexible format matching)
+                video_formats = []
+                for f in formats:
+                    if f.get('vcodec') != 'none':  # Has video
+                        height = f.get('height', 0)
+                        fps = f.get('fps', 0)
+                        filesize = f.get('filesize', 0)
+                        has_audio = f.get('acodec') != 'none'
+                        ext = f.get('ext', '')
+                        
+                        # Accept the format if it matches user preference OR is a common video format
+                        format_acceptable = (
+                            ext == video_format or  # Exact match
+                            ext in ['mp4', 'webm', 'mkv'] or  # Common video formats
+                            (video_format == 'mp4' and ext in ['m4v', 'mov']) or  # MP4-compatible
+                            (video_format == 'webm' and ext in ['webm', 'mkv'])  # WebM-compatible
+                        )
+                        
+                        if format_acceptable and height and height >= 144:  # Minimum quality filter
+                            quality_info = f"{height}p"
+                            if fps:
+                                quality_info += f" ({fps}fps)"
+                            if filesize:
+                                quality_info += f" - {format_file_size(filesize)}"
+                            quality_info += f" - {ext.upper()}"
+                            quality_info += " - " + ("With Audio" if has_audio else "Video Only")
+                            video_formats.append((height, quality_info, f, has_audio, ext))
                 
-                if available_qualities:
-                    st.info(f"📋 Available qualities: {', '.join([q[0] for q in available_qualities])}")
+                # Sort by quality (height) and prefer formats with audio
+                video_formats.sort(key=lambda x: (x[0], x[3]), reverse=True)
                 
-                # IMPROVED: Smart stream selection with better quality matching
-                selected_stream = None
-                has_audio = True
-                alternative_streams = []
+                if video_formats:
+                    available_qualities = [f"{q[0]}p ({q[4]})" for q in video_formats[:5]]  # Show top 5 with format
+                    st.info(f"📋 Available qualities: {', '.join(available_qualities)}")
+                    
+                    # Debug info in expander
+                    with st.expander("🔍 Debug: Format Details"):
+                        st.write(f"Total formats found: {len(video_formats)}")
+                        for i, (height, info, fmt, audio, ext) in enumerate(video_formats[:3]):
+                            st.write(f"{i+1}. {height}p - {ext} - {'Audio' if audio else 'No Audio'} - ID: {fmt.get('format_id', 'N/A')}")
+                else:
+                    st.warning("⚠️ No video formats found. Trying alternative approach...")
+                    # Try to get any available formats
+                    all_formats = video_info.get('formats', [])
+                    st.write(f"Total formats available: {len(all_formats)}")
+                    
+                    if all_formats:
+                        # Show some format details for debugging
+                        with st.expander("🔍 All Available Formats"):
+                            for i, f in enumerate(all_formats[:10]):
+                                vcodec = f.get('vcodec', 'none')
+                                acodec = f.get('acodec', 'none')
+                                ext = f.get('ext', 'unknown')
+                                height = f.get('height', 'N/A')
+                                st.write(f"{i+1}. {ext} - {height}p - Video: {vcodec != 'none'} - Audio: {acodec != 'none'}")
                 
-                # Map quality options to resolution values
+                # Map quality options to selection logic
                 quality_map = {
-                    "Best w/ Audio (Recommended)": None,
-                    "720p w/ Audio": "720p", 
-                    "480p w/ Audio": "480p",
-                    "360p w/ Audio": "360p",
-                    "Best Quality (May need audio merge)": None
+                    "Best w/ Audio (Recommended)": "best_with_audio",
+                    "720p w/ Audio": "720p_with_audio", 
+                    "480p w/ Audio": "480p_with_audio",
+                    "360p w/ Audio": "360p_with_audio",
+                    "Best Quality (May need audio merge)": "best_quality"
                 }
                 
-                target_quality = quality_map.get(quality_option)
-                audio_guaranteed = "w/ Audio" in quality_option
+                selection_type = quality_map.get(quality_option, "best_with_audio")
+                selected_format = None
+                has_audio = True
                 
-                # Get all available progressive streams (with audio)
-                progressive_streams = yt.streams.filter(file_extension=video_format, progressive=True)
-                available_progressive = [stream.resolution for stream in progressive_streams if stream.resolution]
-                
-                # Get all available adaptive streams (video only, higher quality)
-                adaptive_streams = yt.streams.filter(file_extension=video_format, adaptive=True, type='video')
-                available_adaptive = [stream.resolution for stream in adaptive_streams if stream.resolution]
-                
-                # Show what's actually available
-                if available_progressive:
-                    st.success(f"✅ **Available with Audio:** {', '.join(sorted(set(available_progressive), key=lambda x: int(x[:-1]), reverse=True))}")
-                if available_adaptive:
-                    st.info(f"📺 **Available Video-Only (Higher Quality):** {', '.join(sorted(set(available_adaptive), key=lambda x: int(x[:-1]), reverse=True))}")
-                
-                if audio_guaranteed:
-                    if target_quality:
-                        # Try exact quality with audio first
-                        selected_stream = yt.streams.filter(
-                            file_extension=video_format, 
-                            progressive=True, 
-                            res=target_quality
-                        ).first()
-                        
-                        if selected_stream:
-                            st.success(f"✅ Found {target_quality} with audio!")
-                        else:
-                            # Show alternatives and let user choose
-                            st.error(f"❌ {target_quality} with audio not available.")
-                            
-                            # Find closest higher quality with audio
-                            quality_order = ["1080p", "720p", "480p", "360p", "240p", "144p"]
-                            target_index = quality_order.index(target_quality) if target_quality in quality_order else 0
-                            
-                            # Check for higher quality alternatives
-                            higher_quality_found = False
-                            for i in range(target_index):
-                                higher_quality = quality_order[i]
-                                higher_stream = yt.streams.filter(
-                                    file_extension=video_format, 
-                                    progressive=True, 
-                                    res=higher_quality
-                                ).first()
-                                if higher_stream:
-                                    alternative_streams.append((higher_quality, higher_stream, "⬆️ Higher Quality"))
-                                    higher_quality_found = True
-                            
-                            # Check for lower quality alternatives  
-                            for i in range(target_index + 1, len(quality_order)):
-                                lower_quality = quality_order[i]
-                                lower_stream = yt.streams.filter(
-                                    file_extension=video_format, 
-                                    progressive=True, 
-                                    res=lower_quality
-                                ).first()
-                                if lower_stream:
-                                    alternative_streams.append((lower_quality, lower_stream, "⬇️ Lower Quality"))
-                                    break  # Only show the closest lower quality
-                            
-                            # Show alternatives
-                            if alternative_streams:
-                                st.warning("🔀 **Available Alternatives with Audio:**")
-                                for alt_quality, alt_stream, alt_type in alternative_streams:
-                                    col_alt1, col_alt2 = st.columns([3, 1])
-                                    with col_alt1:
-                                        st.write(f"{alt_type} **{alt_quality}** - {format_file_size(alt_stream.filesize) if hasattr(alt_stream, 'filesize') else 'Unknown size'}")
-                                    with col_alt2:
-                                        if st.button(f"Use {alt_quality}", key=f"use_{alt_quality}"):
-                                            selected_stream = alt_stream
-                                            st.success(f"✅ Selected {alt_quality} with audio!")
-                                            st.rerun()
-                            
-                            # If no alternatives, use best available
-                            if not selected_stream and not alternative_streams:
-                                selected_stream = yt.streams.filter(
-                                    file_extension=video_format, 
-                                    progressive=True
-                                ).order_by('resolution').desc().first()
-                                if selected_stream:
-                                    st.warning(f"⚠️ Using best available quality: {selected_stream.resolution} with audio")
+                # Select format based on user choice
+                if selection_type == "best_with_audio":
+                    # Find best quality format with audio
+                    for height, info, fmt, audio, ext in video_formats:
+                        if audio:
+                            selected_format = fmt
+                            has_audio = audio
+                            break
+                elif selection_type.endswith("_with_audio"):
+                    # Find specific quality with audio
+                    target_height = int(selection_type.split('p')[0])
+                    for height, info, fmt, audio, ext in video_formats:
+                        if audio and height <= target_height:
+                            selected_format = fmt
+                            has_audio = audio
+                            break
                     
-                    else:
-                        # Best available with audio
-                        selected_stream = yt.streams.filter(
-                            file_extension=video_format, 
-                            progressive=True
-                        ).order_by('resolution').desc().first()
-                        
-                        if selected_stream:
-                            st.success(f"✅ Best quality with audio: {selected_stream.resolution}")
-                    
-                    # Final fallback: any progressive stream
-                    if not selected_stream:
-                        selected_stream = yt.streams.filter(progressive=True).order_by('resolution').desc().first()
-                        if selected_stream:
-                            st.warning(f"⚠️ Using {selected_stream.mime_type} format with audio (best available)")
+                    # Fallback to any format with audio if target not found
+                    if not selected_format:
+                        for height, info, fmt, audio, ext in video_formats:
+                            if audio:
+                                selected_format = fmt
+                                has_audio = audio
+                                st.warning(f"⚠️ {target_height}p with audio not available. Using {height}p with audio instead.")
+                                break
+                else:  # best_quality
+                    # Get highest quality (may not have audio)
+                    if video_formats:
+                        selected_format = video_formats[0][2]
+                        has_audio = video_formats[0][3]
+                        if not has_audio:
+                            st.warning("🔇 **No Audio Warning**: This high-quality stream contains video only. Audio will be missing!")
                 
-                else:
-                    # "Best Quality" option - offer smart choices
-                    best_adaptive = yt.streams.filter(
-                        file_extension=video_format, 
-                        adaptive=True, 
-                        type='video'
-                    ).order_by('resolution').desc().first()
-                    
-                    best_progressive = yt.streams.filter(
-                        file_extension=video_format, 
-                        progressive=True
-                    ).order_by('resolution').desc().first()
-                    
-                    if best_adaptive and best_progressive:
-                        st.warning("🤔 **Choose Your Priority:**")
-                        col_choice1, col_choice2 = st.columns(2)
-                        
-                        with col_choice1:
-                            st.info(f"🎯 **Highest Quality (No Audio)**\n{best_adaptive.resolution} - {format_file_size(best_adaptive.filesize) if hasattr(best_adaptive, 'filesize') else 'Unknown'}")
-                            if st.button("📹 Choose Highest Quality", key="choose_adaptive"):
-                                selected_stream = best_adaptive
-                                has_audio = False
-                                st.warning("⚠️ Selected video-only stream!")
-                        
-                        with col_choice2:
-                            st.success(f"🔊 **Best with Audio**\n{best_progressive.resolution} - {format_file_size(best_progressive.filesize) if hasattr(best_progressive, 'filesize') else 'Unknown'}")
-                            if st.button("🔊 Choose with Audio", key="choose_progressive", type="primary"):
-                                selected_stream = best_progressive
-                                has_audio = True
-                                st.success("✅ Selected stream with audio!")
-                    
-                    elif best_progressive:
-                        selected_stream = best_progressive
-                        has_audio = True
-                    elif best_adaptive:
-                        selected_stream = best_adaptive
-                        has_audio = False
-                
-                # Final fallback if nothing found
-                if not selected_stream:
-                    selected_stream = yt.streams.get_highest_resolution()
-                    has_audio = selected_stream.is_progressive if selected_stream else False
+                # Final fallback: use yt-dlp's default format selection if no format found
+                if not selected_format and video_formats:
+                    # Just use the first available format
+                    selected_format = video_formats[0][2]  
+                    has_audio = video_formats[0][3]
+                    st.info("ℹ️ Using best available format.")
 
-                if selected_stream:
-                    file_size = selected_stream.filesize if hasattr(selected_stream, 'filesize') else 0
-                    fps_info = f" @ {selected_stream.fps}fps" if hasattr(selected_stream, 'fps') and selected_stream.fps else ""
+                if selected_format:
+                    file_size = selected_format.get('filesize', 0)
+                    height = selected_format.get('height', 0)
+                    fps = selected_format.get('fps', 0)
+                    fps_info = f" @ {fps}fps" if fps else ""
                     
                     # Audio status indicator
                     if has_audio:
-                        st.success(f"✅ **Selected Stream with Audio:**")
+                        st.success(f"✅ **Selected Format with Audio:**")
                         audio_status = "🔊 With Audio"
-                        audio_color = "green"
                     else:
-                        st.error(f"🔇 **Selected Stream (NO AUDIO):**")
+                        st.error(f"🔇 **Selected Format (NO AUDIO):**")
                         audio_status = "🔇 Video Only"
-                        audio_color = "red"
                     
                     col_s1, col_s2, col_s3, col_s4 = st.columns(4)
                     with col_s1:
-                        st.metric("🎯 Quality", f"{selected_stream.resolution or 'Default'}{fps_info}")
+                        st.metric("🎯 Quality", f"{height}p{fps_info}" if height else "Default")
                     with col_s2:
-                        st.metric("📁 File Size", format_file_size(file_size))
+                        st.metric("📁 File Size", format_file_size(file_size) if file_size else "Unknown")
                     with col_s3:
-                        st.metric("� Audio", audio_status)
+                        st.metric("🔊 Audio", audio_status)
                     with col_s4:
-                        st.metric("📺 Type", "Progressive" if selected_stream.is_progressive else "Adaptive")
+                        st.metric("📺 Format", selected_format.get('ext', 'mp4').upper())
                     
                     # Clear warning for video-only streams
                     if not has_audio:
@@ -505,7 +626,7 @@ if toggle_video:
                             st.rerun()
                         st.stop()  # Prevent download of video-only content
 
-                    # Download with progress (only for streams with audio)
+                    # Download with yt-dlp
                     try:
                         download_label = "🔊 Downloading video with audio..." if has_audio else "📹 Downloading video (no audio)..."
                         with st.spinner(download_label):
@@ -513,29 +634,69 @@ if toggle_video:
                             status_text = st.empty()
                             
                             os.makedirs(download_path, exist_ok=True)
-                            file_path = selected_stream.download(output_path=download_path)
-                            file_name = os.path.basename(file_path)
                             
+                            # Configure yt-dlp options for download
+                            if selected_format and 'format_id' in selected_format:
+                                # Use specific format if found
+                                format_selector = str(selected_format['format_id'])
+                            else:
+                                # Fallback to yt-dlp's smart selection
+                                audio_guaranteed = "w/ Audio" in quality_option
+                                if audio_guaranteed:
+                                    if video_format == 'mp4':
+                                        format_selector = 'best[ext=mp4][acodec!=none]/best[acodec!=none]/best'
+                                    else:  # webm
+                                        format_selector = 'best[ext=webm][acodec!=none]/best[acodec!=none]/best'
+                                else:
+                                    format_selector = 'best[ext=' + video_format + ']/best'
+                            
+                            ydl_opts = {
+                                'format': format_selector,
+                                'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
+                                'noplaylist': True,
+                            }
+                            
+                            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                                ydl.download([video_link])
+                                
                             progress_bar.progress(100)
                             status_text.text("Download completed!")
+                            
+                            # Find the downloaded file
+                            title = video_info.get('title', 'video')
+                            # Clean title for filename
+                            clean_title = re.sub(r'[<>:"/\\|?*]', '_', title)
+                            file_name = f"{clean_title}.{video_format}"
+                            file_path = os.path.join(download_path, file_name)
+                            
+                            # Find actual downloaded file (yt-dlp might modify filename)
+                            actual_files = [f for f in os.listdir(download_path) if f.startswith(clean_title[:20])]
+                            if actual_files:
+                                file_name = actual_files[-1]  # Get most recent
+                                file_path = os.path.join(download_path, file_name)
 
                         # Add to history with audio status
                         video_type = "Video (with Audio)" if has_audio else "Video (No Audio)"
-                        add_to_history(video_type, yt.title, file_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                        add_to_history(video_type, video_info.get('title', 'Unknown'), file_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-                        # Provide download button with audio confirmation
-                        download_button_label = "🔊 Save Video (with Audio)" if has_audio else "📹 Save Video (NO AUDIO)"
-                        with open(file_path, "rb") as f:
-                            st.download_button(
-                                label=download_button_label,
-                                data=f,
-                                file_name=file_name,
-                                mime="video/mp4"
-                            )
+                        # Mobile-friendly download success notification
+                        show_mobile_download_success(file_name, video_type)
                         
-                        if has_audio:
-                            st.success("✅ Video with audio download ready! 🔊")
-                        else:
+                        # Provide download button with audio confirmation
+                        if os.path.exists(file_path):
+                            download_button_label = "🔊 Save Video (with Audio)" if has_audio else "📹 Save Video (NO AUDIO)"
+                            
+                            with open(file_path, "rb") as f:
+                                st.download_button(
+                                    label=download_button_label,
+                                    data=f,
+                                    file_name=file_name,
+                                    mime="video/mp4",
+                                    use_container_width=True,
+                                    type="primary"
+                                )
+                        
+                        if not has_audio:
                             st.warning("⚠️ Video downloaded but has NO AUDIO! 🔇")
                     
                     except Exception as download_error:
@@ -550,7 +711,65 @@ if toggle_video:
                         else:
                             st.error(f"❌ Download failed: {download_error}")
                 else:
-                    st.error("No suitable stream found for the selected format and quality.")
+                    # Last resort: try yt-dlp's default format selection
+                    st.warning("⚠️ Using yt-dlp's automatic format selection...")
+                    try:
+                        with st.spinner("Downloading with automatic format selection..."):
+                            progress_bar = st.progress(0)
+                            status_text = st.empty()
+                            
+                            os.makedirs(download_path, exist_ok=True)
+                            
+                            # Use yt-dlp's smart defaults
+                            audio_guaranteed = "w/ Audio" in quality_option
+                            if audio_guaranteed:
+                                format_selector = 'best[acodec!=none]/best'  # Prefer formats with audio
+                            else:
+                                format_selector = 'best'  # Best available quality
+                            
+                            ydl_opts = {
+                                'format': format_selector,
+                                'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
+                                'noplaylist': True,
+                            }
+                            
+                            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                                ydl.download([video_link])
+                                
+                            progress_bar.progress(100)
+                            status_text.text("Download completed!")
+                            
+                            # Find the downloaded file
+                            title = video_info.get('title', 'video')
+                            clean_title = re.sub(r'[<>:"/\\|?*]', '_', title)
+                            
+                            # Find actual downloaded file
+                            actual_files = [f for f in os.listdir(download_path) if f.startswith(clean_title[:20])]
+                            if actual_files:
+                                file_name = actual_files[-1]
+                                file_path = os.path.join(download_path, file_name)
+                                
+                                # Add to history
+                                add_to_history("Video (Auto Format)", video_info.get('title', 'Unknown'), file_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                                
+                                # Provide download button
+                                with open(file_path, "rb") as f:
+                                    st.download_button(
+                                        label="📥 Save Video (Auto Format)",
+                                        data=f,
+                                        file_name=file_name,
+                                        mime="video/mp4"
+                                    )
+                                st.success("✅ Video downloaded with automatic format selection!")
+                            else:
+                                st.error("❌ Could not find downloaded file.")
+                    
+                    except Exception as e:
+                        st.error(f"❌ Download failed even with automatic format selection: {e}")
+                        st.info("💡 **Suggestions:**\n"
+                               "- Try a different video\n"
+                               "- Check your internet connection\n"
+                               "- The video might have restrictions")
 
             except Exception as e:
                 st.error(f"❌ An error occurred while processing video info: {e}")
@@ -562,17 +781,27 @@ if toggle_audio:
         unsafe_allow_html=True
     )
 
-    audio_link = st.text_input("Enter YouTube video URL:", key="audio_url")
+    audio_link = st.text_input("Enter YouTube video URL:", key="audio_url", placeholder="Paste YouTube URL here...")
     
-    # Audio format selection
-    audio_format = st.selectbox("Audio Format:", ["mp4", "webm"], key="audio_format")
+    # Audio format selection with MP3 option (mobile-responsive)
+    st.markdown("### 🎵 Audio Settings")
+    audio_format = st.selectbox(
+        "🎧 Audio Format:", 
+        ["mp3", "m4a", "webm"], 
+        key="audio_format",
+        help="MP3 is most compatible, M4A for Apple devices, WebM for smaller files"
+    )
     
-    download_audio_btn = st.button("🎵 Download Audio", key="audio_btn")
+    # Note about FFmpeg requirement for MP3
+    if audio_format == "mp3":
+        st.info("🔧 **Note**: MP3 conversion requires FFmpeg. If you don't have FFmpeg, choose M4A format instead.")
+    
+    download_audio_btn = st.button("🎵 Download Audio", key="audio_btn", use_container_width=True, type="primary")
 
     if download_audio_btn and audio_link:
         # Enhanced error handling with retries
         with st.spinner("🔍 Fetching audio information... (This may take a moment)"):
-            yt, error_msg = create_youtube_object(audio_link)
+            audio_info, error_msg = get_video_info(audio_link)
         
         if error_msg:
             st.error(error_msg)
@@ -584,72 +813,123 @@ if toggle_audio:
         else:
             try:
                 # Display audio info with better layout
-                st.subheader(f"🎵 {yt.title}")
+                st.subheader(f"🎵 {audio_info.get('title', 'Unknown Title')}")
                 
                 # Audio information in organized columns
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.metric("⏱️ Duration", format_duration(yt.length))
+                    duration = audio_info.get('duration', 0)
+                    st.metric("⏱️ Duration", format_duration(duration) if duration else "N/A")
                 with col2:
-                    st.metric("👤 Channel", yt.author)
+                    uploader = audio_info.get('uploader', 'Unknown')
+                    st.metric("👤 Channel", uploader)
                 
                 # Thumbnail in separate section with proper spacing
                 st.markdown("---")
                 col_thumb_center, col_empty1, col_empty2 = st.columns([2, 1, 1])
                 with col_thumb_center:
-                    st.image(yt.thumbnail_url, caption="🎵 Audio Thumbnail", use_column_width=True)
+                    thumbnail_url = audio_info.get('thumbnail', '')
+                    if thumbnail_url:
+                        st.image(thumbnail_url, caption="🎵 Audio Thumbnail", use_column_width=True)
 
-                # Enhanced audio stream selection
+                # Enhanced audio format selection using yt-dlp
                 st.markdown("---")
-                st.subheader("🎵 Available Audio Streams")
+                st.subheader("🎵 Available Audio Formats")
                 
-                # Get best quality audio stream
-                audio_streams = yt.streams.filter(only_audio=True).order_by('abr').desc()
+                # Get available audio formats
+                formats = audio_info.get('formats', [])
+                audio_formats = []
                 
-                if audio_format == "mp4":
-                    audio_stream = yt.streams.filter(only_audio=True, file_extension='mp4').order_by('abr').desc().first()
-                elif audio_format == "webm":
-                    audio_stream = yt.streams.filter(only_audio=True, file_extension='webm').order_by('abr').desc().first()
+                for f in formats:
+                    if f.get('acodec') != 'none' and f.get('vcodec') == 'none':  # Audio only
+                        ext = f.get('ext', '')
+                        abr = f.get('abr', 0)
+                        filesize = f.get('filesize', 0)
+                        
+                        if ext == audio_format or (not audio_formats and ext in ['m4a', 'webm', 'mp3']):
+                            audio_formats.append((abr or 0, f, ext, filesize))
                 
-                # Fallback to any audio stream
-                if not audio_stream:
-                    audio_stream = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
-
-                if audio_stream:
-                    file_size = audio_stream.filesize if hasattr(audio_stream, 'filesize') else 0
-                    bitrate = audio_stream.abr or 'Default'
-                    st.info(f"🎵 Selected Audio Quality: **{bitrate}** - {format_file_size(file_size)}")
+                # Sort by bitrate (highest first)
+                audio_formats.sort(key=lambda x: x[0], reverse=True)
+                
+                if audio_formats:
+                    selected_audio = audio_formats[0][1]  # Best quality
+                    bitrate = audio_formats[0][0]
+                    filesize = audio_formats[0][3]
+                    
+                    st.info(f"🎵 Selected Audio Quality: **{bitrate}kbps** - {format_file_size(filesize) if filesize else 'Unknown size'}")
                     
                     # Show available audio qualities
-                    available_audio = [f"{stream.abr} ({stream.mime_type})" for stream in audio_streams[:3] if stream.abr]
+                    available_audio = [f"{int(abr)}kbps ({ext})" for abr, f, ext, fs in audio_formats[:3] if abr]
                     if available_audio:
                         st.info(f"📋 Available audio qualities: {', '.join(available_audio)}")
 
-                    # Download with progress
+                    # Download with yt-dlp
                     try:
                         with st.spinner("Downloading audio..."):
                             progress_bar = st.progress(0)
                             status_text = st.empty()
                             
                             os.makedirs(download_path, exist_ok=True)
-                            file_path = audio_stream.download(output_path=download_path)
-                            file_name = os.path.basename(file_path)
+                            
+                            # Configure yt-dlp for audio download with format conversion
+                            ydl_opts = {
+                                'format': 'bestaudio/best',
+                                'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
+                                'noplaylist': True,
+                            }
+                            
+                            # Add post-processor for MP3 conversion if needed
+                            if audio_format == "mp3":
+                                ydl_opts['postprocessors'] = [{
+                                    'key': 'FFmpegExtractAudio',
+                                    'preferredcodec': 'mp3',
+                                    'preferredquality': '192',
+                                }]
+                            elif audio_format == "m4a":
+                                ydl_opts['postprocessors'] = [{
+                                    'key': 'FFmpegExtractAudio',
+                                    'preferredcodec': 'm4a',
+                                    'preferredquality': '192',
+                                }]
+                            
+                            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                                ydl.download([audio_link])
                             
                             progress_bar.progress(100)
                             status_text.text("Download completed!")
+                            
+                            # Find the downloaded file
+                            title = audio_info.get('title', 'audio')
+                            clean_title = re.sub(r'[<>:"/\\|?*]', '_', title)
+                            
+                            # Find actual downloaded file
+                            actual_files = [f for f in os.listdir(download_path) if f.startswith(clean_title[:20])]
+                            if actual_files:
+                                file_name = actual_files[-1]  # Get most recent
+                                file_path = os.path.join(download_path, file_name)
+                            else:
+                                # Fallback filename
+                                file_name = f"{clean_title}.{selected_audio.get('ext', 'm4a')}"
+                                file_path = os.path.join(download_path, file_name)
 
                         # Add to history
-                        add_to_history("Audio", yt.title, file_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                        add_to_history("Audio", audio_info.get('title', 'Unknown'), file_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+                        # Mobile-friendly download success notification
+                        show_mobile_download_success(file_name, "Audio")
 
                         # Provide download button
-                        with open(file_path, "rb") as f:
-                            st.download_button(
-                                label="🎵 Save Audio to Device",
-                                data=f,
-                                file_name=file_name,
-                                mime="audio/mp4"
-                            )
-                        st.success("✅ Audio download ready!")
+                        if os.path.exists(file_path):
+                            with open(file_path, "rb") as f:
+                                st.download_button(
+                                    label="🎵 Save Audio to Device",
+                                    data=f,
+                                    file_name=file_name,
+                                    mime="audio/mp4",
+                                    use_container_width=True,
+                                    type="primary"
+                                )
                     
                     except Exception as download_error:
                         error_msg = str(download_error).lower()
@@ -678,10 +958,15 @@ if toggle_batch:
     batch_option = st.radio("Batch Download Type:", ["Multiple URLs", "YouTube Playlist"], key="batch_type")
     
     if batch_option == "Multiple URLs":
-        urls_text = st.text_area("Enter YouTube URLs (one per line):", key="batch_urls", height=150)
+        urls_text = st.text_area(
+            "Enter YouTube URLs (one per line):", 
+            key="batch_urls", 
+            height=150,
+            placeholder="https://www.youtube.com/watch?v=...\nhttps://www.youtube.com/watch?v=...\n..."
+        )
         batch_format = st.selectbox("Download as:", ["Video", "Audio Only"], key="batch_format")
         
-        if st.button("📚 Download All", key="batch_btn"):
+        if st.button("📚 Download All", key="batch_btn", use_container_width=True, type="primary"):
             urls = [url.strip() for url in urls_text.split('\n') if url.strip()]
             if urls:
                 progress_container = st.container()
@@ -695,21 +980,40 @@ if toggle_batch:
                     for i, url in enumerate(urls):
                         try:
                             status_text.text(f"Processing {i+1}/{len(urls)}: {url}")
-                            yt = YouTube(url)
                             
+                            # Configure yt-dlp options for batch download
                             if batch_format == "Video":
-                                stream = yt.streams.get_highest_resolution()
-                            else:
-                                stream = yt.streams.filter(only_audio=True).first()
+                                ydl_opts = {
+                                    'format': 'best[ext=mp4]/best',
+                                    'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
+                                    'noplaylist': True,
+                                }
+                            else:  # Audio
+                                ydl_opts = {
+                                    'format': 'bestaudio/best',
+                                    'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
+                                    'noplaylist': True,
+                                    'postprocessors': [{
+                                        'key': 'FFmpegExtractAudio',
+                                        'preferredcodec': 'mp3',
+                                        'preferredquality': '192',
+                                    }],
+                                }
                             
-                            if stream:
-                                os.makedirs(download_path, exist_ok=True)
-                                file_path = stream.download(output_path=download_path)
-                                file_name = os.path.basename(file_path)
-                                add_to_history(batch_format, yt.title, file_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                            os.makedirs(download_path, exist_ok=True)
+                            
+                            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                                info = ydl.extract_info(url, download=False)
+                                title = info.get('title', 'Unknown')
+                                ydl.download([url])
+                                
+                                # Find downloaded file
+                                clean_title = re.sub(r'[<>:"/\\|?*]', '_', title)
+                                actual_files = [f for f in os.listdir(download_path) if f.startswith(clean_title[:20])]
+                                file_name = actual_files[-1] if actual_files else f"{clean_title}.mp4"
+                                
+                                add_to_history(batch_format, title, file_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
                                 successful_downloads += 1
-                            else:
-                                failed_downloads += 1
                                 
                         except Exception as e:
                             st.error(f"Failed to download {url}: {e}")
@@ -723,36 +1027,55 @@ if toggle_batch:
                         st.warning(f"⚠️ Failed downloads: {failed_downloads}")
     
     elif batch_option == "YouTube Playlist":
-        playlist_url = st.text_input("Enter YouTube Playlist URL:", key="playlist_url")
+        playlist_url = st.text_input(
+            "Enter YouTube Playlist URL:", 
+            key="playlist_url",
+            placeholder="https://www.youtube.com/playlist?list=..."
+        )
         playlist_format = st.selectbox("Download as:", ["Video", "Audio Only"], key="playlist_format")
         
-        if playlist_url and st.button("📋 Load Playlist Info", key="playlist_info_btn"):
+        if playlist_url and st.button("📋 Load Playlist Info", key="playlist_info_btn", use_container_width=True):
             try:
                 with st.spinner("Loading playlist information..."):
-                    playlist = Playlist(playlist_url)
-                    st.success(f"Playlist: {playlist.title}")
-                    st.info(f"Total videos: {len(playlist.video_urls)}")
+                    ydl_opts = {
+                        'quiet': True,
+                        'extract_flat': True,
+                    }
+                    
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        playlist_info = ydl.extract_info(playlist_url, download=False)
+                        
+                    playlist_title = playlist_info.get('title', 'Unknown Playlist')
+                    entries = playlist_info.get('entries', [])
+                    
+                    st.success(f"Playlist: {playlist_title}")
+                    st.info(f"Total videos: {len(entries)}")
                     
                     # Show first few video titles
                     st.subheader("Preview (first 5 videos):")
-                    for i, video_url in enumerate(playlist.video_urls[:5]):
-                        try:
-                            yt = YouTube(video_url)
-                            st.write(f"{i+1}. {yt.title}")
-                        except:
-                            st.write(f"{i+1}. [Unable to load title]")
+                    for i, entry in enumerate(entries[:5]):
+                        title = entry.get('title', '[Unable to load title]')
+                        st.write(f"{i+1}. {title}")
                     
-                    if len(playlist.video_urls) > 5:
-                        st.write(f"... and {len(playlist.video_urls) - 5} more videos")
+                    if len(entries) > 5:
+                        st.write(f"... and {len(entries) - 5} more videos")
                         
             except Exception as e:
                 st.error(f"Error loading playlist: {e}")
         
-        if playlist_url and st.button("📚 Download Playlist", key="playlist_download_btn"):
+        if playlist_url and st.button("📚 Download Playlist", key="playlist_download_btn", use_container_width=True, type="primary"):
             try:
                 with st.spinner("Processing playlist..."):
-                    playlist = Playlist(playlist_url)
-                    urls = list(playlist.video_urls)
+                    ydl_opts = {
+                        'quiet': True,
+                        'extract_flat': True,
+                    }
+                    
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        playlist_info = ydl.extract_info(playlist_url, download=False)
+                        
+                    entries = playlist_info.get('entries', [])
+                    urls = [f"https://www.youtube.com/watch?v={entry['id']}" for entry in entries if entry.get('id')]
                 
                 progress_container = st.container()
                 with progress_container:
@@ -765,21 +1088,40 @@ if toggle_batch:
                     for i, url in enumerate(urls):
                         try:
                             status_text.text(f"Downloading {i+1}/{len(urls)}")
-                            yt = YouTube(url)
                             
+                            # Configure yt-dlp options
                             if playlist_format == "Video":
-                                stream = yt.streams.get_highest_resolution()
-                            else:
-                                stream = yt.streams.filter(only_audio=True).first()
+                                ydl_opts = {
+                                    'format': 'best[ext=mp4]/best',
+                                    'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
+                                    'noplaylist': True,
+                                }
+                            else:  # Audio
+                                ydl_opts = {
+                                    'format': 'bestaudio/best',
+                                    'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
+                                    'noplaylist': True,
+                                    'postprocessors': [{
+                                        'key': 'FFmpegExtractAudio',
+                                        'preferredcodec': 'mp3',
+                                        'preferredquality': '192',
+                                    }],
+                                }
                             
-                            if stream:
-                                os.makedirs(download_path, exist_ok=True)
-                                file_path = stream.download(output_path=download_path)
-                                file_name = os.path.basename(file_path)
-                                add_to_history(playlist_format, yt.title, file_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                            os.makedirs(download_path, exist_ok=True)
+                            
+                            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                                info = ydl.extract_info(url, download=False)
+                                title = info.get('title', 'Unknown')
+                                ydl.download([url])
+                                
+                                # Find downloaded file
+                                clean_title = re.sub(r'[<>:"/\\|?*]', '_', title)
+                                actual_files = [f for f in os.listdir(download_path) if f.startswith(clean_title[:20])]
+                                file_name = actual_files[-1] if actual_files else f"{clean_title}.mp4"
+                                
+                                add_to_history(playlist_format, title, file_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
                                 successful_downloads += 1
-                            else:
-                                failed_downloads += 1
                                 
                         except Exception as e:
                             st.error(f"Failed to download {url}: {e}")
@@ -806,23 +1148,50 @@ if toggle_image:
     image_option = st.radio("Image Source:", ["Single Image URL", "YouTube Thumbnail", "Batch Image URLs"], key="image_option")
     
     if image_option == "Single Image URL":
-        image_link = st.text_input("Enter Image URL:", key="image_url")
+        image_link = st.text_input(
+            "Enter Image URL:", 
+            key="image_url",
+            placeholder="https://example.com/image.jpg"
+        )
         
-        # Image format and resize options
-        col_format, col_resize = st.columns(2)
-        with col_format:
-            image_format = st.selectbox("Save as:", ["Original", "JPEG", "PNG", "WebP"], key="img_format")
-        with col_resize:
-            resize_option = st.selectbox("Resize:", ["Original Size", "1920x1080", "1280x720", "800x600", "Custom"], key="img_resize")
+        # Image format and resize options (mobile-responsive)
+        st.markdown("### 🎨 Image Settings")
+        
+        image_format = st.selectbox(
+            "💾 Save as:", 
+            ["Original", "JPEG", "PNG", "WebP"], 
+            key="img_format",
+            help="JPEG for photos, PNG for graphics, WebP for smaller files"
+        )
+        
+        resize_option = st.selectbox(
+            "📐 Resize:", 
+            ["Original Size", "1920x1080", "1280x720", "800x600", "Custom"], 
+            key="img_resize",
+            help="Choose size that works best for your device"
+        )
         
         if resize_option == "Custom":
+            st.markdown("#### 📏 Custom Dimensions")
             col_w, col_h = st.columns(2)
             with col_w:
-                custom_width = st.number_input("Width:", min_value=1, value=800, key="custom_w")
+                custom_width = st.number_input(
+                    "Width (px):", 
+                    min_value=1, 
+                    value=800, 
+                    key="custom_w",
+                    help="Image width in pixels"
+                )
             with col_h:
-                custom_height = st.number_input("Height:", min_value=1, value=600, key="custom_h")
+                custom_height = st.number_input(
+                    "Height (px):", 
+                    min_value=1, 
+                    value=600, 
+                    key="custom_h",
+                    help="Image height in pixels"
+                )
         
-        download_image_btn = st.button("🖼️ Download Image", key="image_btn")
+        download_image_btn = st.button("🖼️ Download Image", key="image_btn", use_container_width=True, type="primary")
 
         if download_image_btn and image_link:
             try:
@@ -895,16 +1264,29 @@ if toggle_image:
                 st.error(f"❌ An error occurred: {e}")
     
     elif image_option == "YouTube Thumbnail":
-        youtube_link = st.text_input("Enter YouTube Video URL:", key="yt_thumb_url")
+        youtube_link = st.text_input(
+            "Enter YouTube Video URL:", 
+            key="yt_thumb_url",
+            placeholder="https://www.youtube.com/watch?v=..."
+        )
         thumb_quality = st.selectbox("Thumbnail Quality:", ["maxresdefault", "hqdefault", "mqdefault", "sddefault"], key="thumb_quality")
         
-        if youtube_link and st.button("🖼️ Download Thumbnail", key="yt_thumb_btn"):
+        if youtube_link and st.button("🖼️ Download Thumbnail", key="yt_thumb_btn", use_container_width=True, type="primary"):
             try:
                 with st.spinner("Fetching thumbnail..."):
-                    yt = YouTube(youtube_link)
+                    # Get video info using yt-dlp
+                    ydl_opts = {
+                        'quiet': True,
+                        'no_warnings': True,
+                    }
+                    
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(youtube_link, download=False)
+                        
+                    video_id = info.get('id', '')
+                    title = info.get('title', 'Unknown Video')
                     
                     # Try different thumbnail qualities
-                    video_id = yt.video_id
                     thumbnail_url = f"https://img.youtube.com/vi/{video_id}/{thumb_quality}.jpg"
                     
                     response = requests.get(thumbnail_url)
@@ -912,13 +1294,13 @@ if toggle_image:
                         image_data = response.content
                         img = Image.open(io.BytesIO(image_data))
                         
-                        st.image(img, caption=f"Thumbnail: {yt.title}", use_column_width=True)
+                        st.image(img, caption=f"Thumbnail: {title}", use_column_width=True)
                         
-                        file_name = f"{yt.title}_{thumb_quality}.jpg"
+                        file_name = f"{title}_{thumb_quality}.jpg"
                         # Clean filename
                         file_name = re.sub(r'[<>:"/\\|?*]', '_', file_name)
                         
-                        add_to_history("Thumbnail", yt.title, file_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                        add_to_history("Thumbnail", title, file_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
                         
                         st.download_button(
                             label="📥 Save Thumbnail",
@@ -934,10 +1316,15 @@ if toggle_image:
                 st.error(f"❌ An error occurred: {e}")
     
     elif image_option == "Batch Image URLs":
-        batch_image_urls = st.text_area("Enter Image URLs (one per line):", key="batch_image_urls", height=150)
+        batch_image_urls = st.text_area(
+            "Enter Image URLs (one per line):", 
+            key="batch_image_urls", 
+            height=150,
+            placeholder="https://example.com/image1.jpg\nhttps://example.com/image2.png\n..."
+        )
         batch_img_format = st.selectbox("Convert all to:", ["Keep Original", "JPEG", "PNG", "WebP"], key="batch_img_format")
         
-        if st.button("🖼️ Download All Images", key="batch_img_btn"):
+        if st.button("🖼️ Download All Images", key="batch_img_btn", use_container_width=True, type="primary"):
             urls = [url.strip() for url in batch_image_urls.split('\n') if url.strip()]
             if urls:
                 progress_container = st.container()
@@ -991,7 +1378,7 @@ if toggle_image:
                         st.warning(f"⚠️ Failed downloads: {failed_downloads}")
 
 # --- DOWNLOAD HISTORY ---
-if st.sidebar.button("📜 View Download History"):
+if st.sidebar.button("📜 View Download History", use_container_width=True):
     st.header("📜 Download History")
     
     if st.session_state.download_history:
@@ -1002,7 +1389,7 @@ if st.sidebar.button("📜 View Download History"):
                 st.write(f"**File:** {item['file_name']}")
                 st.write(f"**Downloaded:** {item['download_time']}")
         
-        if st.button("🗑️ Clear History"):
+        if st.button("🗑️ Clear History", use_container_width=True):
             st.session_state.download_history = []
             st.success("History cleared!")
             st.rerun()
@@ -1010,7 +1397,7 @@ if st.sidebar.button("📜 View Download History"):
         st.info("No downloads yet!")
 
 # --- FILE MANAGER ---
-if st.sidebar.button("📁 View Downloaded Files"):
+if st.sidebar.button("📁 View Downloaded Files", use_container_width=True):
     st.header("📁 Downloaded Files")
     
     # Show current download location
@@ -1019,7 +1406,7 @@ if st.sidebar.button("📁 View Downloaded Files"):
     # Button to open Downloads folder (Windows/Mac/Linux compatible)
     col_open1, col_open2 = st.columns(2)
     with col_open1:
-        if st.button("🗂️ Open Downloads Folder", help="Open the downloads folder in your file explorer"):
+        if st.button("🗂️ Open Downloads Folder", help="Open the downloads folder in your file explorer", use_container_width=True):
             try:
                 system = platform.system()
                 if system == "Windows":
@@ -1033,7 +1420,7 @@ if st.sidebar.button("📁 View Downloaded Files"):
                 st.error(f"❌ Could not open folder: {e}")
     
     with col_open2:
-        if st.button("📋 Copy Path", help="Copy the download path to clipboard"):
+        if st.button("📋 Copy Path", help="Copy the download path to clipboard", use_container_width=True):
             try:
                 # For web deployment, show the path for manual copy
                 st.code(download_path, language=None)
@@ -1050,6 +1437,7 @@ if st.sidebar.button("📁 View Downloaded Files"):
             # Sort files by modification time (newest first)
             files.sort(key=lambda x: os.path.getmtime(os.path.join(download_path, x)), reverse=True)
             
+            # Mobile-responsive file listing
             for file in files:
                 file_path = os.path.join(download_path, file)
                 file_size = os.path.getsize(file_path)
@@ -1066,29 +1454,29 @@ if st.sidebar.button("📁 View Downloaded Files"):
                 else:
                     icon = "📄"
                 
-                col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
-                with col1:
-                    st.write(f"{icon} {file}")
-                with col2:
-                    st.write(f"{format_file_size(file_size)}")
-                with col3:
-                    st.write(f"{file_modified.strftime('%m/%d %H:%M')}")
-                with col4:
-                    # Delete button for individual files
-                    if st.button("🗑️", key=f"delete_{file}", help=f"Delete {file}"):
-                        try:
-                            os.remove(file_path)
-                            st.success(f"🗑️ Deleted {file}")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Could not delete {file}: {e}")
+                # Mobile-friendly file display with expander
+                with st.expander(f"{icon} {file[:30]}{'...' if len(file) > 30 else ''}"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write(f"**📁 File:** {file}")
+                        st.write(f"**📊 Size:** {format_file_size(file_size)}")
+                    with col2:
+                        st.write(f"**📅 Modified:** {file_modified.strftime('%m/%d %H:%M')}")
+                        # Delete button for individual files
+                        if st.button(f"🗑️ Delete {file[:20]}{'...' if len(file) > 20 else ''}", key=f"delete_{file}", help=f"Delete {file}", use_container_width=True):
+                            try:
+                                os.remove(file_path)
+                                st.success(f"🗑️ Deleted {file}")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Could not delete {file}: {e}")
         else:
             st.info("📂 No files in download folder yet!")
     else:
         st.info("📂 Download folder doesn't exist yet!")
 
 # --- STATISTICS ---
-if st.sidebar.button("📊 Statistics"):
+if st.sidebar.button("📊 Statistics", use_container_width=True):
     st.header("📊 Download Statistics")
     
     if st.session_state.download_history:
@@ -1112,13 +1500,19 @@ if st.sidebar.button("📊 Statistics"):
     else:
         st.info("No statistics available yet!")
 
-# --- Footer ---
+# --- Mobile-Responsive Footer ---
 st.markdown("---")
 st.markdown(
-    "<div style='text-align: center; padding: 20px;'>"
-    "<h5>🎬 Advanced Downloader v3.0</h5>"
-    "<p>Made with ❤️ by <span style='color: #0320fc;'>Mohit Kumar A</span> for <span style='color: #0320fc;'>Chethana</span></p>"
-    "<p style='font-size: 12px; color: #666;'>✨ New: Downloads to your system Downloads folder • Audio guaranteed • Smart quality selection</p>"
-    "</div>",
+    """
+    <div style='text-align: center; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px; margin: 20px 0;'>
+        <h4 style='color: white; margin-bottom: 10px;'>🎬 Advanced Downloader v3.1</h4>
+        <p style='color: #f0f0f0; margin: 5px 0;'>Made with ❤️ by <a href="https://github.com/Mohitkumar2007" style='color: #FFD700;'>Mohit Kumar A</a></p>
+        <p style='font-size: clamp(10px, 2.5vw, 12px); color: #e0e0e0; margin: 10px 0;'>📱 Mobile Optimized • 🔊 Audio Guaranteed • 📁 Downloads Folder • ✨ Smart Quality Selection</p>
+        <div style='margin-top: 15px; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 10px;'>
+            <p style='color: #FFD700; font-size: clamp(10px, 2.5vw, 12px); margin: 0;'>🚀 <strong>Pro Tip for Mobile Users:</strong></p>
+            <p style='color: #f0f0f0; font-size: clamp(8px, 2vw, 10px); margin: 5px 0 0 0;'>Tap and hold download links to save directly to your device!</p>
+        </div>
+    </div>
+    """,
     unsafe_allow_html=True
 )
