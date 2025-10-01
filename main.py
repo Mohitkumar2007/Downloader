@@ -589,15 +589,14 @@ if toggle_video:
                             
                             os.makedirs(download_path, exist_ok=True)
                             
-                            # Configure yt-dlp options for download - simplified for cloud compatibility
+                            # Use yt-dlp's default smart format selection for maximum compatibility
                             audio_guaranteed = "w/ Audio" in quality_option
                             if audio_guaranteed:
-                                if video_format == 'mp4':
-                                    format_selector = 'best[ext=mp4][acodec!=none]/best[acodec!=none]/best'
-                                else:  # webm
-                                    format_selector = 'best[ext=webm][acodec!=none]/best[acodec!=none]/best'
+                                # Prioritize formats with audio, fallback to best available
+                                format_selector = 'best[acodec!=none]/best'
                             else:
-                                format_selector = 'best[ext=' + video_format + ']/best'
+                                # Just get the best quality available
+                                format_selector = 'best'
                             
                             ydl_opts = {
                                 'format': format_selector,
@@ -933,7 +932,7 @@ if toggle_batch:
                             # Configure yt-dlp options for batch download
                             if batch_format == "Video":
                                 ydl_opts = {
-                                    'format': 'best[ext=mp4]/best',
+                                    'format': 'best',
                                     'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
                                     'noplaylist': True,
                                 }
@@ -1041,7 +1040,7 @@ if toggle_batch:
                             # Configure yt-dlp options
                             if playlist_format == "Video":
                                 ydl_opts = {
-                                    'format': 'best[ext=mp4]/best',
+                                    'format': 'best',
                                     'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
                                     'noplaylist': True,
                                 }
