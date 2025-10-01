@@ -191,5 +191,5 @@ Thumbs.db
 *.swp
 *.swo
 
-# Streamlit
-.streamlit/
+# Streamlit secrets only (allow config)
+.streamlit/secrets.toml
