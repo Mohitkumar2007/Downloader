@@ -79,6 +79,42 @@ def create_session_cookies():
     
     return cookies
 
+def get_bypass_config(strategy_type='standard'):
+    """Get specialized yt-dlp configuration for different bypass strategies"""
+    base_config = {
+        'quiet': True,
+        'no_warnings': True,
+        'socket_timeout': 60,
+        'retries': 5,
+        'fragment_retries': 5,
+    }
+    
+    if strategy_type == 'signature_bypass':
+        return {
+            **base_config,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android_creator'],
+                    'player_skip': ['js', 'configs'],
+                    'skip': ['hls'],
+                }
+            },
+            'user_agent': 'com.google.android.apps.youtube.creator/22.30.100 (Linux; U; Android 11; SM-G973F Build/RP1A.200720.012) gzip',
+        }
+    elif strategy_type == 'tv_bypass':
+        return {
+            **base_config,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['tv_embedded'],
+                    'innertube_host': 'www.youtube.com',
+                }
+            },
+            'user_agent': 'Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.0) AppleWebKit/537.36 (KHTML, like Gecko) 85.0.4183.93/6.0 TV Safari/537.36',
+        }
+    else:
+        return base_config
+
 def get_default_download_path():
     """Get the system's default Downloads folder"""
     try:
@@ -195,13 +231,21 @@ def get_video_info(url, max_retries=3):
                 'max_sleep_interval': 5,
                 'socket_timeout': 30,
                 
-                # Alternative extraction methods
+                # Advanced extraction methods with signature bypass
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['android', 'web'],
-                        'player_skip': ['configs'],
+                        'player_client': ['android', 'web', 'ios', 'mweb'],
+                        'player_skip': ['configs', 'webpage'],
+                        'skip': ['hls', 'dash'],
+                        'innertube_host': 'studio.youtube.com',
+                        'innertube_key': None,
                     }
                 },
+                
+                # Proxy simulation (without actual proxy)
+                'proxy': None,
+                'geo_bypass': True,
+                'geo_verification_proxy': None,
                 
                 # Retry configuration
                 'retries': 3,
@@ -217,13 +261,24 @@ def get_video_info(url, max_retries=3):
             except Exception as primary_error:
                 # If primary method fails, try alternative extraction strategies
                 fallback_strategies = [
-                    # Strategy 1: Android client only
-                    {**ydl_opts, 'extractor_args': {'youtube': {'player_client': ['android']}}},
-                    # Strategy 2: Web client with different headers
-                    {**ydl_opts, 'extractor_args': {'youtube': {'player_client': ['web']}}, 
-                     'http_headers': {**ydl_opts['http_headers'], 'X-YouTube-Client-Name': '1', 'X-YouTube-Client-Version': '2.20231101.00.00'}},
-                    # Strategy 3: Minimal headers approach
-                    {**ydl_opts, 'http_headers': {'User-Agent': random.choice(user_agents)}, 'extractor_args': {}}
+                    # Strategy 1: Android client with TV API
+                    {**ydl_opts, 'extractor_args': {'youtube': {'player_client': ['android_creator', 'android_vr']}}},
+                    
+                    # Strategy 2: iOS client with music context
+                    {**ydl_opts, 'extractor_args': {'youtube': {'player_client': ['ios_music', 'ios_creator']}}, 
+                     'http_headers': {**ydl_opts['http_headers'], 'X-YouTube-Client-Name': '26', 'X-YouTube-Client-Version': '17.31.35'}},
+                    
+                    # Strategy 3: TV client (often bypasses restrictions)
+                    {**ydl_opts, 'extractor_args': {'youtube': {'player_client': ['tv_embedded']}},
+                     'http_headers': {'User-Agent': 'com.google.ios.youtube/17.31.4 (iPhone14,3; U; CPU iOS 15_6 like Mac OS X)', 'X-YouTube-Client-Name': '85'}},
+                     
+                    # Strategy 4: Web embedded client
+                    {**ydl_opts, 'extractor_args': {'youtube': {'player_client': ['web_embedded']}},
+                     'http_headers': {**ydl_opts['http_headers'], 'Origin': 'https://www.youtube.com', 'X-YouTube-Client-Name': '56'}},
+                     
+                    # Strategy 5: Minimal approach with no signature verification
+                    {'quiet': True, 'no_warnings': True, 'extractor_args': {'youtube': {'player_client': ['android'], 'player_skip': ['js']}}, 
+                     'user_agent': 'com.google.android.youtube/17.36.4 (Linux; U; Android 12; SM-G973F Build/SP1A.210812.016) gzip'}
                 ]
                 
                 for i, fallback_opts in enumerate(fallback_strategies):
